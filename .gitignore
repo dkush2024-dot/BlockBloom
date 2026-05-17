@@ -1,0 +1,17 @@
+# Dependencies
+node_modules/
+
+# Build output
+frontend/dist/
+
+# Hardhat
+hardhat/cache/
+hardhat/artifacts/
+hardhat/ignition/deployments/
+
+# Environment variables (NEVER push these!)
+.env
+
+# OS files
+.DS_Store
+Thumbs.db
