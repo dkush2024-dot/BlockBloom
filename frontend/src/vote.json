@@ -35,16 +35,10 @@
             "outputs": [
                 { "internalType": "string", "name": "winnerName", "type": "string" },
                 { "internalType": "string", "name": "winnerSymbol", "type": "string" },
-                { "internalType": "uint256", "name": "winnerVotes", "type": "uint256" }
+                { "internalType": "uint256", "name": "winnerVotes", "type": "uint256" },
+                { "internalType": "bool", "name": "isTie", "type": "bool" }
             ],
             "stateMutability": "view",
-            "type": "function"
-        },
-        {
-            "inputs": [],
-            "name": "openRegistration",
-            "outputs": [],
-            "stateMutability": "nonpayable",
             "type": "function"
         },
         {
@@ -59,6 +53,15 @@
             "name": "registrationOpen",
             "outputs": [{ "internalType": "bool", "name": "", "type": "bool" }],
             "stateMutability": "view",
+            "type": "function"
+        },
+        {
+            "inputs": [
+                { "internalType": "uint256", "name": "candidateId", "type": "uint256" }
+            ],
+            "name": "removeCandidate",
+            "outputs": [],
+            "stateMutability": "nonpayable",
             "type": "function"
         },
         {
@@ -83,5 +86,5 @@
             "type": "function"
         }
     ],
-    "address": "0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0"
+    "address": "0x9A9f2CCfdE556A7E9Ff0848998Aa4a0CFD8863AE"
 }

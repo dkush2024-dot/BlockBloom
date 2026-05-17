@@ -33,18 +33,29 @@ contract SimpleVoting {
         candidates[totalCandidates] = Candidate(name, partySymbol, 0);
     }
 
+    // Admin removes an existing candidate during registration using swap-and-delete
+    function removeCandidate(uint256 candidateId) public onlyOwner {
+        require(registrationOpen, "Candidate registration is closed");
+        require(candidateId > 0 && candidateId <= totalCandidates, "Invalid candidate ID");
+
+        // Swap the candidate to be deleted with the last candidate in the mapping
+        if (candidateId != totalCandidates) {
+            candidates[candidateId] = candidates[totalCandidates];
+        }
+        
+        // Delete the last element and decrement count
+        delete candidates[totalCandidates];
+        totalCandidates--;
+    }
+
     // Admin can close registration to prevent new candidates being added
     function closeRegistration() public onlyOwner {
         registrationOpen = false;
     }
 
-    // Admin can reopen registration
-    function openRegistration() public onlyOwner {
-        registrationOpen = true;
-    }
-
     function vote(uint256 candidateId) public {
         require(!registrationOpen, "Voting hasn't started yet. Registration is still open.");
+        require(msg.sender != owner, "Admin is not allowed to vote in the election.");
         require(!voters[msg.sender], "You have already voted");
         require(candidateId > 0 && candidateId <= totalCandidates, "Invalid candidate ID");
 
@@ -52,18 +63,27 @@ contract SimpleVoting {
         candidates[candidateId].votes++;
     }
 
-    function getWinner() public view returns (string memory winnerName, string memory winnerSymbol, uint256 winnerVotes) {
+    function getWinner() public view returns (string memory winnerName, string memory winnerSymbol, uint256 winnerVotes, bool isTie) {
         uint256 maxVotes = 0;
         uint256 winnerId = 0;
+        bool tie = false;
 
         for (uint256 i = 1; i <= totalCandidates; i++) {
             if (candidates[i].votes > maxVotes) {
                 maxVotes = candidates[i].votes;
                 winnerId = i;
+                tie = false;
+            } else if (candidates[i].votes == maxVotes && maxVotes > 0) {
+                tie = true;
             }
         }
-        winnerName = candidates[winnerId].name;
-        winnerSymbol = candidates[winnerId].partySymbol;
-        winnerVotes = candidates[winnerId].votes;
+        
+        if (tie) {
+            return ("Tie", "TIE", maxVotes, true);
+        } else if (winnerId != 0) {
+            return (candidates[winnerId].name, candidates[winnerId].partySymbol, candidates[winnerId].votes, false);
+        } else {
+            return ("None", "NONE", 0, false);
+        }
     }
 }

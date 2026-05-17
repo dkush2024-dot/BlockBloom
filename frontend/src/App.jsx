@@ -21,6 +21,11 @@ function App() {
   const [partySymbol, setPartySymbol] = useState('');
   const [isAdding, setIsAdding] = useState(false);
 
+  const isUrl = (str) => {
+    if (!str) return false;
+    return str.startsWith('http://') || str.startsWith('https://') || str.startsWith('/') || str.startsWith('data:');
+  };
+
   const getContract = async () => {
     const provider = new BrowserProvider(window.ethereum);
     const signer = await provider.getSigner();
@@ -38,6 +43,10 @@ function App() {
   };
 
   const vote = async (id) => {
+    if (isAdmin) {
+      alert("As the admin, you are not allowed to vote in the election.");
+      return;
+    }
     setIsVoting(true);
     try {
       const votingContract = await getContract();
@@ -83,17 +92,26 @@ function App() {
     }
   };
 
-  const toggleRegistration = async () => {
+  const deleteCandidate = async (candidateId) => {
+    if (!window.confirm("Are you sure you want to remove this candidate?")) return;
+    try {
+      const votingContract = await getContract();
+      await votingContract.removeCandidate(candidateId);
+      alert("Candidate removed successfully!");
+      await loadCandidates(votingContract);
+    } catch (error) {
+      console.error(error);
+      alert("Failed to remove candidate. Ensure registration is open.");
+    }
+  };
+
+  const closeRegistration = async () => {
     try {
       const votingContract = await getContract();
       if (registrationOpen) {
         await votingContract.closeRegistration();
         setRegistrationOpen(false);
-        alert("Registration closed. Voting is now open!");
-      } else {
-        await votingContract.openRegistration();
-        setRegistrationOpen(true);
-        alert("Registration re-opened!");
+        alert("Registration irrevocably closed. Voting is now open!");
       }
     } catch (error) {
       alert("Transaction failed.");
@@ -228,13 +246,12 @@ function App() {
                       />
                     </div>
                     <div>
-                      <label className="block text-xs font-semibold text-gray-600 mb-1.5">Party Symbol / Abbreviation</label>
+                      <label className="block text-xs font-semibold text-gray-600 mb-1.5">Party Logo URL or Abbreviation</label>
                       <input
                         type="text"
                         value={partySymbol}
                         onChange={(e) => setPartySymbol(e.target.value)}
-                        placeholder="e.g. PA"
-                        maxLength={5}
+                        placeholder="e.g. https://domain.com/logo.png or BJP"
                         disabled={!registrationOpen}
                         className="w-full border border-gray-200 rounded-lg px-3 py-2.5 text-sm text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent disabled:bg-gray-50 disabled:text-gray-400"
                       />
@@ -261,14 +278,29 @@ function App() {
                       <div className="divide-y divide-gray-50">
                         {candidates.map((c, i) => (
                           <div key={i} className="flex items-center px-5 py-3">
-                            <div className={`w-8 h-8 rounded-lg flex items-center justify-center text-xs font-bold flex-shrink-0 ${avatarColors[i % avatarColors.length]}`}>
-                              {c.partySymbol || c.name.slice(0, 2)}
+                            <div className="w-8 h-8 rounded-lg overflow-hidden flex items-center justify-center bg-gray-100 border border-gray-200 flex-shrink-0">
+                              {isUrl(c.partySymbol) ? (
+                                <img src={c.partySymbol} alt="Party Logo" className="w-full h-full object-cover" />
+                              ) : (
+                                <span className="text-xs font-bold text-gray-700">{c.partySymbol || c.name.slice(0, 2)}</span>
+                              )}
                             </div>
                             <div className="ml-3">
                               <p className="text-sm font-medium text-gray-800">{c.name}</p>
-                              <p className="text-xs text-gray-400">Symbol: {c.partySymbol}</p>
+                              <p className="text-xs text-gray-400">
+                                {isUrl(c.partySymbol) ? 'Logo: Custom Photo' : `Symbol: ${c.partySymbol}`}
+                              </p>
                             </div>
-                            <span className="ml-auto text-xs text-gray-400">#{i + 1}</span>
+                            <div className="ml-auto flex items-center space-x-3">
+                              <span className="text-xs text-gray-400">#{i + 1}</span>
+                              <button
+                                onClick={() => deleteCandidate(i + 1)}
+                                disabled={!registrationOpen}
+                                className="text-xs font-semibold text-rose-600 hover:text-rose-700 bg-rose-50 hover:bg-rose-100 px-2.5 py-1 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                              >
+                                Remove
+                              </button>
+                            </div>
                           </div>
                         ))}
                       </div>
@@ -298,19 +330,20 @@ function App() {
                     </div>
                   </dl>
                   <button
-                    onClick={toggleRegistration}
+                    onClick={closeRegistration}
+                    disabled={!registrationOpen}
                     className={`w-full text-sm font-semibold py-2.5 px-4 rounded-xl transition-colors ${
                       registrationOpen
-                        ? 'bg-green-600 hover:bg-green-700 text-white'
-                        : 'bg-amber-500 hover:bg-amber-600 text-white'
+                        ? 'bg-amber-500 hover:bg-amber-600 text-white'
+                        : 'bg-gray-100 text-gray-400 cursor-not-allowed'
                     }`}
                   >
-                    {registrationOpen ? '🔒 Close Registration & Start Voting' : '🔓 Re-open Registration'}
+                    {registrationOpen ? '🔒 Permanently Close Registration & Start Voting' : 'Voting Active (Registration Locked)'}
                   </button>
                   <p className="text-xs text-gray-400 mt-2 text-center">
                     {registrationOpen
-                      ? "Closing registration will allow voters to cast votes."
-                      : "Re-opening will pause voting until registration is closed again."}
+                      ? "Warning: Closing registration is permanent. You cannot add candidates or reopen it afterwards."
+                      : "Registration is permanently closed. Voters are now casting their ballots."}
                   </p>
                 </div>
               </div>
@@ -372,14 +405,20 @@ function App() {
                             <div className={`w-4 h-4 rounded-full border-2 flex items-center justify-center flex-shrink-0 transition-colors ${isSelected ? 'border-indigo-600 bg-indigo-600' : 'border-gray-300 bg-white'}`}>
                               {isSelected && <div className="w-1.5 h-1.5 bg-white rounded-full"></div>}
                             </div>
-                            <div className={`w-9 h-9 rounded-lg flex items-center justify-center text-sm font-bold ml-3 flex-shrink-0 ${avatarColor}`}>
-                              {candidate.partySymbol || candidate.name.slice(0, 2)}
+                            <div className="w-9 h-9 rounded-lg overflow-hidden flex items-center justify-center bg-gray-100 border border-gray-200 ml-3 flex-shrink-0">
+                              {isUrl(candidate.partySymbol) ? (
+                                <img src={candidate.partySymbol} alt="Party Logo" className="w-full h-full object-cover" />
+                              ) : (
+                                <span className="text-sm font-bold text-gray-700">{candidate.partySymbol || candidate.name.slice(0, 2)}</span>
+                              )}
                             </div>
                             <div className="ml-3 flex-1 min-w-0">
                               <div className="flex items-center justify-between mb-1">
                                 <div>
                                   <span className={`text-sm font-medium ${isSelected ? 'text-indigo-900' : 'text-gray-800'}`}>{candidate.name}</span>
-                                  <span className="ml-2 text-xs text-gray-400">{candidate.partySymbol}</span>
+                                  {!isUrl(candidate.partySymbol) && (
+                                    <span className="ml-2 text-xs text-gray-400">{candidate.partySymbol}</span>
+                                  )}
                                 </div>
                                 <div className="flex items-center space-x-2 text-xs text-gray-500">
                                   <span>{votes} {votes === 1 ? 'vote' : 'votes'}</span>
@@ -423,12 +462,30 @@ function App() {
                 <div className="bg-white border border-gray-200 rounded-2xl p-5">
                   <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-4">Current Leader</h3>
                   {winner ? (
-                    <div className="text-center py-2">
-                      <div className="w-10 h-10 bg-indigo-100 text-indigo-700 rounded-xl flex items-center justify-center font-bold text-sm mx-auto mb-2">{winner[1] || '?'}</div>
-                      <p className="font-bold text-gray-900 text-base">{winner[0]}</p>
-                      <p className="text-gray-500 text-xs mt-1">{Number(winner[2])} votes</p>
-                      <button onClick={getVoteCount} className="w-full mt-3 border border-gray-200 bg-gray-50 hover:bg-gray-100 text-gray-600 text-xs font-medium py-1.5 px-3 rounded-lg transition-colors">Refresh</button>
-                    </div>
+                      <div className="text-center py-2">
+                        {winner[3] ? (
+                          <>
+                            <div className="w-10 h-10 bg-amber-50 border border-amber-100 text-amber-700 rounded-xl overflow-hidden flex items-center justify-center font-bold text-lg mx-auto mb-2">
+                              ⚖️
+                            </div>
+                            <p className="font-bold text-gray-900 text-base">It's a Tie!</p>
+                            <p className="text-gray-500 text-xs mt-1">Top candidates have {Number(winner[2])} votes</p>
+                          </>
+                        ) : (
+                          <>
+                            <div className="w-10 h-10 bg-indigo-50 border border-indigo-100 text-indigo-700 rounded-xl overflow-hidden flex items-center justify-center font-bold text-sm mx-auto mb-2">
+                              {isUrl(winner[1]) ? (
+                                <img src={winner[1]} alt="Winner Logo" className="w-full h-full object-cover" />
+                              ) : (
+                                winner[1] || '?'
+                              )}
+                            </div>
+                            <p className="font-bold text-gray-900 text-base">{winner[0]}</p>
+                            <p className="text-gray-500 text-xs mt-1">{Number(winner[2])} votes</p>
+                          </>
+                        )}
+                        <button onClick={getVoteCount} className="w-full mt-3 border border-gray-200 bg-gray-50 hover:bg-gray-100 text-gray-600 text-xs font-medium py-1.5 px-3 rounded-lg transition-colors">Refresh</button>
+                      </div>
                   ) : (
                     <button onClick={getVoteCount} className="w-full border border-gray-200 bg-gray-50 hover:bg-gray-100 text-gray-700 text-sm font-medium py-2 px-4 rounded-lg transition-colors">Check Results</button>
                   )}
