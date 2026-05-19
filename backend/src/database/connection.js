@@ -16,9 +16,26 @@ const mongoose = require('mongoose');
 const config = require('../config');
 const logger = require('../config/logger');
 
+let mongoServer;
+
 async function connectDatabase() {
   try {
-    await mongoose.connect(config.mongoUri, {
+    let uri = config.mongoUri;
+
+    // Automatically spin up an in-memory MongoDB server in development mode
+    if (config.nodeEnv === 'development') {
+      try {
+        const { MongoMemoryServer } = require('mongodb-memory-server');
+        logger.info('Starting MongoMemoryServer for development...');
+        mongoServer = await MongoMemoryServer.create();
+        uri = mongoServer.getUri();
+        logger.info(`✨ Spin up in-memory MongoDB: ${uri}`);
+      } catch (memErr) {
+        logger.warn('Failed to spin up in-memory MongoDB, using default config:', memErr.message);
+      }
+    }
+
+    await mongoose.connect(uri, {
       // These options are Mongoose 8 defaults but listed explicitly for clarity
       autoIndex: !config.isProduction, // Disable auto-indexing in production (run migrations)
     });
@@ -48,6 +65,10 @@ async function connectDatabase() {
  */
 async function disconnectDatabase() {
   await mongoose.connection.close();
+  if (mongoServer) {
+    await mongoServer.stop();
+    logger.info('In-memory MongoDB Server stopped.');
+  }
   logger.info('MongoDB connection closed gracefully.');
 }
 

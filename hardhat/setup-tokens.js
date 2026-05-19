@@ -2,7 +2,7 @@ const { ethers } = require("hardhat");
 
 async function main() {
   const signers = await ethers.getSigners();
-  const tokenAddress = "0x5FbDB2315678afecb367f032d93F642f64180aa3";
+  const tokenAddress = "0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512";
   const token = await ethers.getContractAt("BloomToken", tokenAddress);
 
   // We will setup the first 3 accounts (Account #0, #1, and #2)

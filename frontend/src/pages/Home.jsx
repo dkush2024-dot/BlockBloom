@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { BrowserProvider, Contract } from "ethers";
 import { useNavigate } from "react-router-dom";
+import { io } from "socket.io-client";
 import contracts from "../contracts.json";
 
 function Home() {
@@ -17,11 +18,43 @@ function Home() {
 
   useEffect(() => {
     fetchDAOs();
+
+    // Connect to WebSocket server on Port 5000
+    const socket = io("http://localhost:5000");
+    socket.on("dao:created", (newDao) => {
+      console.log("Real-time event: DAO Deployed!", newDao);
+      fetchDAOs();
+    });
+
+    return () => {
+      socket.disconnect();
+    };
   }, []);
 
   const fetchDAOs = async () => {
     try {
       setLoading(true);
+
+      // 1. Try to fetch from fast MongoDB backend REST API first
+      try {
+        const response = await fetch("http://localhost:5000/api/daos");
+        if (response.ok) {
+          const result = await response.json();
+          if (result.success && result.data) {
+            const mapped = result.data.map(dao => ({
+              address: dao.contractAddress,
+              name: dao.name,
+              proposals: dao.proposalCount
+            }));
+            setDaos(mapped);
+            return;
+          }
+        }
+      } catch (backendError) {
+        console.warn("Backend down, falling back to on-chain querying:", backendError);
+      }
+
+      // 2. On-chain Fallback
       if (!window.ethereum) return;
       const provider = new BrowserProvider(window.ethereum);
 

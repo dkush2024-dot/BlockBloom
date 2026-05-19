@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { useParams, Link } from "react-router-dom";
 import { BrowserProvider, Contract, formatEther } from "ethers";
+import { io } from "socket.io-client";
 import contracts from "../contracts.json";
 
 function DAODashboard() {
@@ -24,6 +25,31 @@ function DAODashboard() {
 
   useEffect(() => {
     connectAndLoad();
+
+    // Connect to WebSocket server on Port 5000
+    const socket = io("http://localhost:5000");
+
+    // Subscribe to this DAO's update channel
+    socket.emit("join:dao", address);
+
+    // Listen to real-time events and refresh state
+    socket.on("proposal:created", (newProp) => {
+      if (newProp.daoAddress.toLowerCase() === address.toLowerCase()) {
+        console.log("Real-time proposal created:", newProp);
+        connectAndLoad();
+      }
+    });
+
+    socket.on("vote:cast", (voteInfo) => {
+      if (voteInfo.daoAddress.toLowerCase() === address.toLowerCase()) {
+        console.log("Real-time vote cast:", voteInfo);
+        connectAndLoad();
+      }
+    });
+
+    return () => {
+      socket.disconnect();
+    };
   }, [address]);
 
   const connectAndLoad = async () => {
@@ -49,10 +75,38 @@ function DAODashboard() {
   const loadDAO = async (provider) => {
     try {
       setLoading(true);
+
+      // Fetch DAO details from blockchain for Name
       const gov = new Contract(address, contracts.Governance.abi, provider);
       const name = await gov.name();
       setDaoName(name);
 
+      // 1. Try to fetch proposals from MongoDB fast REST API first
+      try {
+        const response = await fetch(`http://localhost:5000/api/proposals?daoAddress=${address}`);
+        if (response.ok) {
+          const result = await response.json();
+          if (result.success && result.data) {
+            const mapped = result.data.map(p => ({
+              id: Number(p.proposalId),
+              proposer: p.proposer,
+              description: p.description,
+              endTime: Math.floor(new Date(p.endTime).getTime() / 1000),
+              executed: p.executed,
+              optionNames: p.options.map(o => o.name),
+              optionVotes: p.options.map(o => parseFloat(formatEther(o.voteCount))),
+              target: p.target,
+              value: Number(p.value),
+            }));
+            setProposals(mapped);
+            return;
+          }
+        }
+      } catch (backendError) {
+        console.warn("Backend down, falling back to on-chain proposal querying:", backendError);
+      }
+
+      // 2. On-chain Fallback
       const count = Number(await gov.proposalCount());
       const props = [];
       for (let i = 1; i <= count; i++) {
