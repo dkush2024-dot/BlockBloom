@@ -61,23 +61,17 @@ describe("SimpleVoting", function () {
   });
 
   describe("Registration Toggling", function () {
-    it("Should allow the owner to close and re-open registration", async function () {
+    it("Should allow the owner to close registration", async function () {
       const { voting } = await loadFixture(deployVotingFixture);
       
       await voting.closeRegistration();
       expect(await voting.registrationOpen()).to.be.false;
-      
-      await voting.openRegistration();
-      expect(await voting.registrationOpen()).to.be.true;
     });
 
     it("Should not allow non-owners to toggle registration", async function () {
       const { voting, otherAccount } = await loadFixture(deployVotingFixture);
       
       await expect(voting.connect(otherAccount).closeRegistration())
-        .to.be.revertedWith("Only the admin can do this");
-        
-      await expect(voting.connect(otherAccount).openRegistration())
         .to.be.revertedWith("Only the admin can do this");
     });
   });
@@ -166,7 +160,7 @@ describe("SimpleVoting", function () {
       expect(winnerVotes).to.equal(2);
     });
 
-    it("Should handle ties by returning the first candidate with the max votes", async function () {
+    it("Should handle ties correctly by returning a Tie flag", async function () {
       const { voting, owner, otherAccount, voter1, voter2 } = await loadFixture(deployVotingFixture);
       
       await voting.addCandidate("Alice", "ALC");
@@ -178,13 +172,12 @@ describe("SimpleVoting", function () {
       await voting.connect(voter1).vote(1);
       await voting.connect(voter2).vote(2);
       
-      const [winnerName, winnerSymbol, winnerVotes] = await voting.getWinner();
+      const [winnerName, winnerSymbol, winnerVotes, isTie] = await voting.getWinner();
       
-      // According to the logic in getWinner, it loops 1 to totalCandidates.
-      // If votes > maxVotes, it updates winner. Since 1 > 1 is false, Bob won't override Alice if tied.
-      expect(winnerName).to.equal("Alice");
-      expect(winnerSymbol).to.equal("ALC");
+      expect(winnerName).to.equal("Tie");
+      expect(winnerSymbol).to.equal("TIE");
       expect(winnerVotes).to.equal(1);
+      expect(isTie).to.be.true;
     });
   });
 });

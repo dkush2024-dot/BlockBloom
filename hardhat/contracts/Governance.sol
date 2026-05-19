@@ -10,6 +10,7 @@ contract Governance {
     ERC20Votes public bloomToken;
     Treasury public treasury;
     uint256 public proposalThreshold; // Minimum tokens required to create a proposal
+    uint256 public quorumPercentage; // Percentage of total token supply required to vote (e.g. 10 for 10%)
 
     struct Proposal {
         uint256 id;
@@ -35,10 +36,11 @@ contract Governance {
     event ProposalQueued(uint256 proposalId, bytes32 timelockTxId);
     event ProposalExecuted(uint256 proposalId);
 
-    constructor(string memory _name, address _tokenAddress, uint256 _proposalThreshold, uint256 _timelockDelay) {
+    constructor(string memory _name, address _tokenAddress, uint256 _proposalThreshold, uint256 _timelockDelay, uint256 _quorumPercentage) {
         name = _name;
         bloomToken = ERC20Votes(_tokenAddress);
         proposalThreshold = _proposalThreshold;
+        quorumPercentage = _quorumPercentage;
         // Each DAO automatically gets its own Treasury with the specified timelock delay
         treasury = new Treasury(address(this), _timelockDelay);
     }
@@ -123,12 +125,19 @@ contract Governance {
         require(block.timestamp > p.endTime, "Voting has not ended yet");
         require(!p.executed, "Proposal already executed");
 
-        // Check that option 0 (e.g., "Yes" / "Approve") won
+        // Check that option 0 (e.g., "Yes" / "Approve") won and calculate total votes for quorum
         uint256 winningVotes = p.optionVotes[0];
+        uint256 totalVotes = winningVotes;
         for (uint256 i = 1; i < p.optionVotes.length; i++) {
             require(winningVotes >= p.optionVotes[i], "Option 0 did not win");
+            totalVotes += p.optionVotes[i];
         }
         require(winningVotes > 0, "No votes were cast");
+
+        // Enforce Quorum
+        uint256 totalSupplyAtSnapshot = bloomToken.getPastTotalSupply(p.snapshotBlock);
+        uint256 requiredQuorum = (totalSupplyAtSnapshot * quorumPercentage) / 100;
+        require(totalVotes >= requiredQuorum, "Quorum not met");
 
         p.executed = true;
 

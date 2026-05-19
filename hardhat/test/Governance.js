@@ -91,8 +91,9 @@ describe("Governance, Treasury & Tokenomics", function () {
       const tokenAddress = await token.getAddress();
       const threshold = ethers.parseEther("100");
       const timelockDelay = 60; // 60 seconds for testing
+      const quorumPercentage = 10; // 10% of total supply
 
-      await factory.connect(user1).createDAO("Test DAO", tokenAddress, threshold, timelockDelay);
+      await factory.connect(user1).createDAO("Test DAO", tokenAddress, threshold, timelockDelay, quorumPercentage);
 
       const daos = await factory.getDeployedDAOs();
       expect(daos.length).to.equal(1);
@@ -116,8 +117,9 @@ describe("Governance, Treasury & Tokenomics", function () {
       const { token, factory, owner, user1, user2, user3, recipient } = await deployContractsFixture();
       const tokenAddress = await token.getAddress();
       const threshold = ethers.parseEther("100");
+      const quorumPercentage = 10; // 10% quorum (requires 1000 BLOOM since total supply is 10000)
 
-      await factory.createDAO("Treasury DAO", tokenAddress, threshold, TIMELOCK_DELAY);
+      await factory.createDAO("Treasury DAO", tokenAddress, threshold, TIMELOCK_DELAY, quorumPercentage);
       const daos = await factory.getDeployedDAOs();
 
       const Governance = await ethers.getContractFactory("Governance");
@@ -238,11 +240,34 @@ describe("Governance, Treasury & Tokenomics", function () {
       );
       await mine();
 
-      // Only user2 votes Reject (option 1)
-      await dao.connect(user2).vote(1, 1);
+      // user1 (1000 BLOOM) and user2 (500 BLOOM) vote
+      // user2 votes Reject (option 1), but user1 must vote to meet quorum
+      // Wait, if user1 votes Approve, it passes.
+      // If we want Option 0 to lose but meet quorum, user1 votes Reject, user2 votes Approve
+      await dao.connect(user1).vote(1, 1); // Reject (1000 votes)
+      await dao.connect(user2).vote(1, 0); // Approve (500 votes)
       await time.increase(11 * 60);
 
       await expect(dao.executeProposal(1)).to.be.revertedWith("Option 0 did not win");
+    });
+
+    it("Should revert execution if quorum is not met", async function () {
+      const { dao, user1, user2, recipient } = await loadFixture(deployDAOFixture);
+
+      await dao.connect(user1).createFinancialProposal(
+        "Low turnout",
+        10,
+        ["Approve", "Reject"],
+        recipient.address,
+        ethers.parseEther("1")
+      );
+      await mine();
+
+      // Only user2 votes Approve (500 votes). Quorum requires 1000 votes.
+      await dao.connect(user2).vote(1, 0); 
+      await time.increase(11 * 60);
+
+      await expect(dao.executeProposal(1)).to.be.revertedWith("Quorum not met");
     });
 
     it("Should revert finalize if timelock has not passed", async function () {

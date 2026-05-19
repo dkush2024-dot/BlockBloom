@@ -13,6 +13,7 @@ contract DAOFactory {
         address indexed tokenAddress,
         uint256 proposalThreshold,
         uint256 timelockDelay,
+        uint256 quorumPercentage,
         address creator
     );
 
@@ -21,13 +22,15 @@ contract DAOFactory {
     /// @param _tokenAddress The ERC20Votes token used for governance
     /// @param _proposalThreshold Minimum tokens required to create a proposal
     /// @param _timelockDelay Time (in seconds) that financial transactions must wait before execution
+    /// @param _quorumPercentage Percentage of total supply required to vote (e.g. 10 for 10%)
     function createDAO(
         string memory _name,
         address _tokenAddress,
         uint256 _proposalThreshold,
-        uint256 _timelockDelay
+        uint256 _timelockDelay,
+        uint256 _quorumPercentage
     ) public returns (address) {
-        Governance newDAO = new Governance(_name, _tokenAddress, _proposalThreshold, _timelockDelay);
+        Governance newDAO = new Governance(_name, _tokenAddress, _proposalThreshold, _timelockDelay, _quorumPercentage);
         address daoAddress = address(newDAO);
         deployedDAOs.push(daoAddress);
 
@@ -38,6 +41,7 @@ contract DAOFactory {
             _tokenAddress,
             _proposalThreshold,
             _timelockDelay,
+            _quorumPercentage,
             msg.sender
         );
 
