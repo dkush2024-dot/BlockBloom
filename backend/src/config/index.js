@@ -32,6 +32,9 @@ const config = {
   // --- Rate Limiting ---
   rateLimitWindowMs: parseInt(process.env.RATE_LIMIT_WINDOW_MS, 10) || 15 * 60 * 1000,
   rateLimitMax: parseInt(process.env.RATE_LIMIT_MAX, 10) || 100,
+
+  // --- Auth ---
+  jwtSecret: process.env.JWT_SECRET || 'super-secret-default-key-please-change',
 };
 
 /**

@@ -45,6 +45,8 @@ const errorHandler = require('./api/middleware/errorHandler');
 const notFoundHandler = require('./api/middleware/notFoundHandler');
 const { initializeWebSocket } = require('./websocket/socketManager');
 const { startEventIndexer, stopEventIndexer } = require('./events/eventIndexer');
+const cron = require('node-cron');
+const proposalService = require('./services/proposalService');
 
 // ─── Create Express App ──────────────────────────────────────────────
 
@@ -121,7 +123,20 @@ async function startServer() {
     // Step 2: Start the blockchain event indexer
     await startEventIndexer();
 
-    // Step 3: Start listening for HTTP requests
+    // Step 3: Start cron jobs
+    cron.schedule('0 * * * *', async () => {
+      logger.info('Running cron job: closeExpiredProposals');
+      try {
+        const result = await proposalService.closeExpiredProposals();
+        if (result.closedCount > 0) {
+          logger.info(`Closed ${result.closedCount} expired proposals.`);
+        }
+      } catch (error) {
+        logger.error('Error running closeExpiredProposals cron job:', error);
+      }
+    });
+
+    // Step 4: Start listening for HTTP requests
     server.listen(config.port, () => {
       logger.info(`
 ╔═══════════════════════════════════════════════════════╗

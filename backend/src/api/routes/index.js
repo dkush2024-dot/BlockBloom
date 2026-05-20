@@ -11,6 +11,7 @@ const router = express.Router();
 const daoRoutes = require('./daoRoutes');
 const proposalRoutes = require('./proposalRoutes');
 const voteRoutes = require('./voteRoutes');
+const authRoutes = require('./authRoutes');
 
 // Health check endpoint — useful for load balancers and monitoring
 router.get('/health', (req, res) => {
@@ -26,5 +27,6 @@ router.get('/health', (req, res) => {
 router.use('/daos', daoRoutes);
 router.use('/proposals', proposalRoutes);
 router.use('/votes', voteRoutes);
+router.use('/auth', authRoutes);
 
 module.exports = router;
