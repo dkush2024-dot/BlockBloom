@@ -45,6 +45,8 @@ async function handleDAOCreated(daoAddress, treasuryAddress, name, tokenAddress,
       transactionHash: txReceipt.transactionHash,
     };
 
+    const exists = await DAO.findOne({ contractAddress: daoData.contractAddress });
+
     const dao = await DAO.findOneAndUpdate(
       { contractAddress: daoData.contractAddress },
       daoData,
@@ -53,7 +55,9 @@ async function handleDAOCreated(daoAddress, treasuryAddress, name, tokenAddress,
 
     logger.info(`📦 DAO indexed: "${name}" at ${daoAddress} with Treasury ${treasuryAddress}`);
 
-    emitGlobal('dao:created', dao.toObject());
+    if (!exists) {
+      emitGlobal('dao:created', dao.toObject());
+    }
   } catch (error) {
     logger.error('Error handling DAOCreated event:', error);
   }
@@ -96,21 +100,30 @@ async function handleProposalCreated(daoAddress, id, proposer, description, snap
       transactionHash: txReceipt.transactionHash,
     };
 
+    const exists = await Proposal.findOne({
+      daoAddress: proposalData.daoAddress,
+      proposalId: proposalData.proposalId,
+    });
+
     const proposal = await Proposal.findOneAndUpdate(
       { daoAddress: proposalData.daoAddress, proposalId: proposalData.proposalId },
       proposalData,
       { upsert: true, new: true, setDefaultsOnInsert: true }
     );
 
-    await DAO.findOneAndUpdate(
-      { contractAddress: daoAddress.toLowerCase() },
-      { $inc: { proposalCount: 1 } }
-    );
+    if (!exists) {
+      await DAO.findOneAndUpdate(
+        { contractAddress: daoAddress.toLowerCase() },
+        { $inc: { proposalCount: 1 } }
+      );
+    }
 
     logger.info(`📝 Proposal indexed: #${id} in DAO ${daoAddress}`);
 
-    emitToDAO(daoAddress, 'proposal:created', proposal.toObject());
-    emitGlobal('proposal:created', proposal.toObject());
+    if (!exists) {
+      emitToDAO(daoAddress, 'proposal:created', proposal.toObject());
+      emitGlobal('proposal:created', proposal.toObject());
+    }
   } catch (error) {
     logger.error('Error handling ProposalCreated event:', error);
   }
@@ -133,6 +146,12 @@ async function handleVoteCast(daoAddress, proposalId, voter, optionIndex, weight
       transactionHash: txReceipt.transactionHash,
     };
 
+    const exists = await Vote.findOne({
+      daoAddress: voteData.daoAddress,
+      proposalId: voteData.proposalId,
+      voter: voteData.voter,
+    });
+
     const vote = await Vote.findOneAndUpdate(
       {
         daoAddress: voteData.daoAddress,
@@ -143,10 +162,12 @@ async function handleVoteCast(daoAddress, proposalId, voter, optionIndex, weight
       { upsert: true, new: true, setDefaultsOnInsert: true }
     );
 
-    await Proposal.findOneAndUpdate(
-      { daoAddress: voteData.daoAddress, proposalId: voteData.proposalId },
-      { $inc: { totalVotesCast: 1 } }
-    );
+    if (!exists) {
+      await Proposal.findOneAndUpdate(
+        { daoAddress: voteData.daoAddress, proposalId: voteData.proposalId },
+        { $inc: { totalVotesCast: 1 } }
+      );
+    }
 
     try {
       const governanceContract = getGovernanceContract(daoAddress);
@@ -164,15 +185,19 @@ async function handleVoteCast(daoAddress, proposalId, voter, optionIndex, weight
       logger.warn('Could not refresh proposal tallies from chain:', err.message);
     }
 
-    await DAO.findOneAndUpdate(
-      { contractAddress: daoAddress.toLowerCase() },
-      { $inc: { totalVotes: 1 } }
-    );
+    if (!exists) {
+      await DAO.findOneAndUpdate(
+        { contractAddress: daoAddress.toLowerCase() },
+        { $inc: { totalVotes: 1 } }
+      );
+    }
 
     logger.info(`🗳️  Vote indexed: voter ${voter} on proposal #${proposalId}`);
 
-    emitToDAO(daoAddress, 'vote:cast', vote.toObject());
-    emitGlobal('vote:cast', vote.toObject());
+    if (!exists) {
+      emitToDAO(daoAddress, 'vote:cast', vote.toObject());
+      emitGlobal('vote:cast', vote.toObject());
+    }
   } catch (error) {
     logger.error('Error handling VoteCast event:', error);
   }
@@ -259,7 +284,7 @@ async function pollBlockchain() {
       const factorySync = await SyncState.findOne({ contractId: 'DAOFactory' });
       // On brand new node / reset, start from 0
       let startBlock = factorySync ? factorySync.lastSyncedBlock + 1 : 0;
-      if (startBlock > currentBlock) {
+      if (factorySync && factorySync.lastSyncedBlock > currentBlock) {
         // If node reset and currentBlock is lower than last synced, reset sync state
         startBlock = 0;
       }
@@ -286,7 +311,7 @@ async function pollBlockchain() {
       const daoSync = await SyncState.findOne({ contractId: syncKey });
       
       let startBlock = daoSync ? daoSync.lastSyncedBlock + 1 : dao.blockNumber || 0;
-      if (startBlock > currentBlock) {
+      if (daoSync && daoSync.lastSyncedBlock > currentBlock) {
         startBlock = dao.blockNumber || 0;
       }
 
@@ -342,6 +367,13 @@ async function pollBlockchain() {
           );
         } catch (err) {
           logger.error(`Error polling events for DAO ${daoAddress}:`, err.message);
+          // If contract is not found or throws error on fresh node, mark it as synced up to currentBlock
+          // to prevent infinite retry loops
+          await SyncState.findOneAndUpdate(
+            { contractId: syncKey },
+            { lastSyncedBlock: currentBlock },
+            { upsert: true }
+          );
         }
       }
     }
