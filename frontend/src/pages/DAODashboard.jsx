@@ -26,6 +26,12 @@ function DAODashboard() {
   // AI Summary state
   const [aiSummaries, setAiSummaries] = useState({});
   const [summarizing, setSummarizing] = useState({});
+  const [geminiApiKey, setGeminiApiKey] = useState(
+    localStorage.getItem("GEMINI_API_KEY") || import.meta.env.VITE_GEMINI_API_KEY || ""
+  );
+  const [showKeyModal, setShowKeyModal] = useState(false);
+  const [tempKey, setTempKey] = useState("");
+  const [pendingSummaryArgs, setPendingSummaryArgs] = useState(null);
 
   useEffect(() => {
     connectAndLoad();
@@ -204,12 +210,20 @@ function DAODashboard() {
   };
 
   const summarizeProposal = async (proposalId, description) => {
-    if (aiSummaries[proposalId]) return; // Already summarized
+    if (aiSummaries[proposalId] && aiSummaries[proposalId] !== "Could not generate summary." && !aiSummaries[proposalId].includes("Invalid API key")) return;
+    
+    const activeKey = geminiApiKey || localStorage.getItem("GEMINI_API_KEY");
+    if (!activeKey) {
+      setPendingSummaryArgs({ proposalId, description });
+      setTempKey("");
+      setShowKeyModal(true);
+      return;
+    }
+
     setSummarizing((prev) => ({ ...prev, [proposalId]: true }));
     try {
-      const apiKey = "AIzaSyB4yXFRd_GIJQKWBHQF7jLb-_GSXBqle4E";
       const res = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`,
+        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${activeKey}`,
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -226,6 +240,11 @@ function DAODashboard() {
           }),
         }
       );
+
+      if (res.status === 400 || res.status === 403) {
+        throw new Error("Invalid API key");
+      }
+
       const data = await res.json();
       const summary =
         data?.candidates?.[0]?.content?.parts?.[0]?.text ||
@@ -233,12 +252,38 @@ function DAODashboard() {
       setAiSummaries((prev) => ({ ...prev, [proposalId]: summary }));
     } catch (err) {
       console.error("AI summary failed:", err);
-      setAiSummaries((prev) => ({
-        ...prev,
-        [proposalId]: "Failed to generate summary. Please try again.",
-      }));
+      if (err.message === "Invalid API key") {
+        setAiSummaries((prev) => ({
+          ...prev,
+          [proposalId]: "Invalid API key. Please check your credentials.",
+        }));
+        setPendingSummaryArgs({ proposalId, description });
+        setTempKey(activeKey);
+        setShowKeyModal(true);
+      } else {
+        setAiSummaries((prev) => ({
+          ...prev,
+          [proposalId]: "Failed to generate summary. Please try again.",
+        }));
+      }
     } finally {
       setSummarizing((prev) => ({ ...prev, [proposalId]: false }));
+    }
+  };
+
+  const handleSaveApiKey = () => {
+    const trimmed = tempKey.trim();
+    localStorage.setItem("GEMINI_API_KEY", trimmed);
+    setGeminiApiKey(trimmed);
+    setShowKeyModal(false);
+    if (pendingSummaryArgs) {
+      // Retry summarizing
+      const { proposalId, description } = pendingSummaryArgs;
+      setPendingSummaryArgs(null);
+      // Wait a tick for state update
+      setTimeout(() => {
+        summarizeProposal(proposalId, description);
+      }, 100);
     }
   };
 
@@ -374,8 +419,18 @@ function DAODashboard() {
                   <div className="mt-3">
                     {aiSummaries[p.id] ? (
                       <div className="bg-purple-50 border border-purple-100 rounded-xl px-4 py-3">
-                        <p className="text-xs font-semibold text-purple-600 mb-1 flex items-center">
-                          <span className="mr-1">✨</span> AI Summary
+                        <p className="text-xs font-semibold text-purple-600 mb-1 flex items-center justify-between">
+                          <span className="flex items-center"><span className="mr-1">✨</span> AI Summary</span>
+                          <button
+                            onClick={() => {
+                              setPendingSummaryArgs({ proposalId: p.id, description: p.description });
+                              setTempKey(geminiApiKey);
+                              setShowKeyModal(true);
+                            }}
+                            className="text-[10px] text-purple-400 hover:text-purple-600 font-medium transition-colors"
+                          >
+                            Update Key
+                          </button>
                         </p>
                         <p className="text-sm text-purple-800 leading-relaxed">
                           {aiSummaries[p.id]}
@@ -579,6 +634,71 @@ function DAODashboard() {
                 ) : (
                   "📝 Submit Proposal"
                 )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {/* ─── Gemini API Key Modal ─── */}
+      {showKeyModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center">
+          <div
+            className="absolute inset-0 bg-black/40 backdrop-blur-sm"
+            onClick={() => setShowKeyModal(false)}
+          ></div>
+          <div className="relative bg-white rounded-3xl border border-gray-200 shadow-2xl w-full max-w-md p-8 mx-4">
+            <button
+              onClick={() => setShowKeyModal(false)}
+              className="absolute top-4 right-4 text-gray-400 hover:text-gray-600 transition-colors"
+            >
+              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+
+            <div className="w-12 h-12 bg-gradient-to-br from-purple-500 to-indigo-600 rounded-xl flex items-center justify-center mx-auto mb-5 shadow-lg">
+              <svg className="w-6 h-6 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M15 7a2 2 0 012 2m-5 8a2 2 0 01-2-2V9a2 2 0 114 0v4a2 2 0 01-2 2z" />
+              </svg>
+            </div>
+
+            <h2 className="text-xl font-bold text-gray-900 text-center mb-1">
+              Configure Gemini API Key
+            </h2>
+            <p className="text-sm text-gray-500 text-center mb-6">
+              AI summaries require a valid Google Gemini API Key.
+            </p>
+
+            <div className="space-y-4">
+              <div>
+                <label className="block text-xs font-semibold text-gray-600 mb-1.5">
+                  Gemini API Key
+                </label>
+                <input
+                  type="password"
+                  value={tempKey}
+                  onChange={(e) => setTempKey(e.target.value)}
+                  placeholder="Paste your AIzaSy... API Key"
+                  className="w-full border border-gray-200 rounded-xl px-4 py-2.5 text-sm text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                />
+                <p className="text-xs text-gray-400 mt-2">
+                  Don't have a key? Get one for free at{" "}
+                  <a
+                    href="https://aistudio.google.com/"
+                    target="_blank"
+                    rel="noreferrer"
+                    className="text-purple-600 hover:text-purple-700 font-semibold underline"
+                  >
+                    Google AI Studio
+                  </a>.
+                </p>
+              </div>
+
+              <button
+                onClick={handleSaveApiKey}
+                className="w-full py-3 px-4 rounded-xl text-sm font-semibold bg-purple-600 hover:bg-purple-700 text-white shadow-sm hover:shadow-md transition-all duration-200 mt-2"
+              >
+                💾 Save API Key
               </button>
             </div>
           </div>
