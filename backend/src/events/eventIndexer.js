@@ -28,7 +28,7 @@ const activeListeners = new Map();
  * Handles a DAOCreated event — saves DAO to database, emits to clients,
  * and starts listening to the new DAO's Governance and Treasury events.
  */
-async function handleDAOCreated(daoAddress, treasuryAddress, name, tokenAddress, proposalThreshold, timelockDelay, creator, event) {
+async function handleDAOCreated(daoAddress, treasuryAddress, name, tokenAddress, proposalThreshold, timelockDelay, quorumPercentage, creator, event) {
   try {
     const txReceipt = event.log || event;
 
@@ -39,6 +39,7 @@ async function handleDAOCreated(daoAddress, treasuryAddress, name, tokenAddress,
       tokenAddress: tokenAddress.toLowerCase(),
       proposalThreshold: proposalThreshold.toString(),
       timelockDelay: Number(timelockDelay),
+      quorumPercentage: Number(quorumPercentage),
       creator: creator.toLowerCase(),
       blockNumber: txReceipt.blockNumber,
       transactionHash: txReceipt.transactionHash,
@@ -291,7 +292,7 @@ async function startTreasuryListener(treasuryAddress, daoAddress) {
 }
 
 /**
- * Main entry point — starts all event listeners.
+ * Main entry point — starts all event listeners and syncs history.
  */
 async function startEventIndexer() {
   const provider = getProvider();
@@ -300,21 +301,100 @@ async function startEventIndexer() {
     return;
   }
 
+  const currentBlock = await provider.getBlockNumber();
+  logger.info(`🔍 Syncing blockchain events up to block ${currentBlock}...`);
+
   const daoFactory = getDAOFactoryContract();
   if (daoFactory) {
-    daoFactory.on('DAOCreated', (daoAddress, treasuryAddress, name, tokenAddress, proposalThreshold, timelockDelay, creator, event) => {
-      handleDAOCreated(daoAddress, treasuryAddress, name, tokenAddress, proposalThreshold, timelockDelay, creator, event);
+    // 1. Sync historical DAOCreated events
+    try {
+      const factorySync = await SyncState.findOne({ contractId: 'DAOFactory' });
+      const startBlock = factorySync ? factorySync.lastSyncedBlock + 1 : 0;
+      
+      if (startBlock <= currentBlock) {
+        logger.info(`Factory sync: querying events from block ${startBlock} to ${currentBlock}`);
+        const events = await daoFactory.queryFilter('DAOCreated', startBlock, currentBlock);
+        for (const event of events) {
+          const [daoAddress, treasuryAddress, name, tokenAddress, proposalThreshold, timelockDelay, quorumPercentage, creator] = event.args;
+          await handleDAOCreated(daoAddress, treasuryAddress, name, tokenAddress, proposalThreshold, timelockDelay, quorumPercentage, creator, event);
+        }
+        await SyncState.findOneAndUpdate(
+          { contractId: 'DAOFactory' },
+          { lastSyncedBlock: currentBlock },
+          { upsert: true }
+        );
+      }
+    } catch (err) {
+      logger.error('Error syncing historical DAOCreated events:', err);
+    }
+
+    // Live listener
+    daoFactory.on('DAOCreated', (daoAddress, treasuryAddress, name, tokenAddress, proposalThreshold, timelockDelay, quorumPercentage, creator, event) => {
+      handleDAOCreated(daoAddress, treasuryAddress, name, tokenAddress, proposalThreshold, timelockDelay, quorumPercentage, creator, event);
+      SyncState.findOneAndUpdate({ contractId: 'DAOFactory' }, { lastSyncedBlock: event.log.blockNumber }, { upsert: true }).catch(err => {
+        logger.error('Failed to update factory sync state:', err);
+      });
     });
     logger.info(`👂 Listening to DAOFactory at ${await daoFactory.getAddress()}`);
   } else {
     logger.warn('DAOFactory contract not configured — skipping factory listener.');
   }
 
-  const existingDAOs = await DAO.find({}).select('contractAddress treasuryAddress').lean();
+  // 2. Sync historical Governance events for all DAOs
+  const existingDAOs = await DAO.find({}).lean();
   for (const dao of existingDAOs) {
-    await startGovernanceListener(dao.contractAddress);
+    const daoAddress = dao.contractAddress;
+    const syncKey = `DAO:${daoAddress}`;
+    const daoSync = await SyncState.findOne({ contractId: syncKey });
+    const startBlock = daoSync ? daoSync.lastSyncedBlock + 1 : dao.blockNumber || 0;
+
+    if (startBlock <= currentBlock) {
+      try {
+        const govContract = getGovernanceContract(daoAddress);
+        logger.info(`Syncing DAO ${dao.name} (${daoAddress}) events from block ${startBlock} to ${currentBlock}`);
+        
+        // ProposalCreated
+        const pEvents = await govContract.queryFilter('ProposalCreated', startBlock, currentBlock);
+        for (const ev of pEvents) {
+          const [id, proposer, description, snapshotBlock, endTime, target, value] = ev.args;
+          await handleProposalCreated(daoAddress, id, proposer, description, snapshotBlock, endTime, target, value, ev);
+        }
+
+        // VoteCast
+        const vEvents = await govContract.queryFilter('VoteCast', startBlock, currentBlock);
+        for (const ev of vEvents) {
+          const [proposalId, voter, optionIndex, weight] = ev.args;
+          await handleVoteCast(daoAddress, proposalId, voter, optionIndex, weight, ev);
+        }
+
+        // ProposalQueued
+        const qEvents = await govContract.queryFilter('ProposalQueued', startBlock, currentBlock);
+        for (const ev of qEvents) {
+          const [proposalId, timelockTxId] = ev.args;
+          await handleProposalQueued(daoAddress, proposalId, timelockTxId);
+        }
+
+        // ProposalExecuted
+        const eEvents = await govContract.queryFilter('ProposalExecuted', startBlock, currentBlock);
+        for (const ev of eEvents) {
+          const [proposalId] = ev.args;
+          await handleProposalExecuted(daoAddress, proposalId);
+        }
+
+        await SyncState.findOneAndUpdate(
+          { contractId: syncKey },
+          { lastSyncedBlock: currentBlock },
+          { upsert: true }
+        );
+      } catch (err) {
+        logger.error(`Error syncing events for DAO ${daoAddress}:`, err);
+      }
+    }
+
+    // Start live listeners
+    await startGovernanceListener(daoAddress);
     if (dao.treasuryAddress) {
-      await startTreasuryListener(dao.treasuryAddress, dao.contractAddress);
+      await startTreasuryListener(dao.treasuryAddress, daoAddress);
     }
   }
 

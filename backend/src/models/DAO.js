@@ -66,6 +66,12 @@ const daoSchema = new mongoose.Schema(
       index: true,
     },
 
+    // Minimum vote percentage required for a proposal to pass (Phase 2)
+    quorumPercentage: {
+      type: Number,
+      default: 0,
+    },
+
     // Number of proposals created inside this DAO (denormalized for fast queries)
     proposalCount: {
       type: Number,
