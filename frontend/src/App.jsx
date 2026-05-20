@@ -2,6 +2,8 @@ import { BrowserRouter, Routes, Route, Link } from "react-router-dom";
 import V1Demo from "./pages/V1Demo";
 import Home from "./pages/Home";
 import DAODashboard from "./pages/DAODashboard";
+import Leaderboard from "./pages/Leaderboard";
+import Profile from "./pages/Profile";
 
 function App() {
   return (
@@ -19,7 +21,8 @@ function App() {
             </div>
             
             <div className="flex space-x-6 items-center">
-              <Link to="/" className="text-sm font-semibold text-gray-600 hover:text-indigo-600 transition-colors">Factory (V2)</Link>
+              <Link to="/" className="text-sm font-semibold text-gray-600 hover:text-indigo-600 transition-colors">DAOs</Link>
+              <Link to="/leaderboard" className="text-sm font-semibold text-gray-600 hover:text-indigo-600 transition-colors">Leaderboard</Link>
               <Link to="/v1" className="text-sm font-semibold text-gray-600 hover:text-indigo-600 transition-colors">Demo (V1)</Link>
               <a href="https://github.com/Nikhil10510/BlockBloom" target="_blank" rel="noreferrer" className="text-sm font-semibold text-gray-600 hover:text-indigo-600 transition-colors">GitHub</a>
             </div>
@@ -31,6 +34,8 @@ function App() {
           <Routes>
             <Route path="/" element={<Home />} />
             <Route path="/dao/:address" element={<DAODashboard />} />
+            <Route path="/leaderboard" element={<Leaderboard />} />
+            <Route path="/profile/:walletAddress" element={<Profile />} />
             <Route path="/v1" element={<V1Demo />} />
             <Route path="*" element={<div className="text-center py-20 text-gray-500">Page not found</div>} />
           </Routes>

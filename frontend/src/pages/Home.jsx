@@ -4,20 +4,25 @@ import { useNavigate } from "react-router-dom";
 import { io } from "socket.io-client";
 import contracts from "../contracts.json";
 
+const API_BASE = "http://localhost:5000/api";
+
 function Home() {
   const [daos, setDaos] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
   const [deploying, setDeploying] = useState(false);
+  const [platformStats, setPlatformStats] = useState(null);
   const navigate = useNavigate();
 
   // Deploy form state
   const [daoName, setDaoName] = useState("");
   const [threshold, setThreshold] = useState("1");
   const [timelockDelay, setTimelockDelay] = useState("60");
+  const [quorumPercentage, setQuorumPercentage] = useState("10");
 
   useEffect(() => {
     fetchDAOs();
+    fetchPlatformStats();
 
     // Connect to WebSocket server on Port 5000
     const socket = io("http://localhost:5000");
@@ -103,7 +108,8 @@ function Home() {
         daoName.trim(),
         contracts.BloomToken.address,
         BigInt(threshold),
-        BigInt(timelockDelay)
+        BigInt(timelockDelay),
+        BigInt(quorumPercentage)
       );
       await tx.wait();
 
@@ -112,12 +118,24 @@ function Home() {
       setDaoName("");
       setThreshold("1");
       setTimelockDelay("60");
+      setQuorumPercentage("10");
       await fetchDAOs();
+      await fetchPlatformStats();
     } catch (err) {
       console.error("Deploy failed:", err);
       alert("Failed to deploy DAO. Check console for details.");
     } finally {
       setDeploying(false);
+    }
+  };
+
+  const fetchPlatformStats = async () => {
+    try {
+      const res = await fetch(`${API_BASE}/daos/stats`);
+      const result = await res.json();
+      if (result.success) setPlatformStats(result.data);
+    } catch (err) {
+      console.warn("Could not load platform stats:", err);
     }
   };
 
@@ -141,6 +159,24 @@ function Home() {
           + Deploy New DAO
         </button>
       </div>
+
+      {/* Platform Stats Banner */}
+      {platformStats && (
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-8">
+          <div className="bg-gradient-to-br from-indigo-500 to-indigo-600 rounded-2xl p-5 text-white shadow-lg">
+            <p className="text-xs font-medium uppercase tracking-wider opacity-80 mb-1">Total DAOs</p>
+            <p className="text-3xl font-bold">{platformStats.totalDAOs}</p>
+          </div>
+          <div className="bg-gradient-to-br from-purple-500 to-purple-600 rounded-2xl p-5 text-white shadow-lg">
+            <p className="text-xs font-medium uppercase tracking-wider opacity-80 mb-1">Total Proposals</p>
+            <p className="text-3xl font-bold">{platformStats.totalProposals}</p>
+          </div>
+          <div className="bg-gradient-to-br from-emerald-500 to-emerald-600 rounded-2xl p-5 text-white shadow-lg">
+            <p className="text-xs font-medium uppercase tracking-wider opacity-80 mb-1">Total Votes Cast</p>
+            <p className="text-3xl font-bold">{platformStats.totalVotes}</p>
+          </div>
+        </div>
+      )}
 
       {/* DAO List */}
       {loading ? (
@@ -267,7 +303,7 @@ function Home() {
                 <p className="text-xs text-gray-400 mt-1">Auto-linked to the deployed BloomToken contract.</p>
               </div>
 
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-3 gap-4">
                 <div>
                   <label className="block text-xs font-semibold text-gray-600 mb-1.5">
                     Proposal Threshold
@@ -279,11 +315,11 @@ function Home() {
                     min="1"
                     className="w-full border border-gray-200 rounded-xl px-4 py-2.5 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
                   />
-                  <p className="text-xs text-gray-400 mt-1">Min tokens to create proposals</p>
+                  <p className="text-xs text-gray-400 mt-1">Min tokens</p>
                 </div>
                 <div>
                   <label className="block text-xs font-semibold text-gray-600 mb-1.5">
-                    Timelock Delay (sec)
+                    Timelock (sec)
                   </label>
                   <input
                     type="number"
@@ -292,7 +328,21 @@ function Home() {
                     min="1"
                     className="w-full border border-gray-200 rounded-xl px-4 py-2.5 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
                   />
-                  <p className="text-xs text-gray-400 mt-1">Financial tx security delay</p>
+                  <p className="text-xs text-gray-400 mt-1">Financial delay</p>
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-gray-600 mb-1.5">
+                    Quorum %
+                  </label>
+                  <input
+                    type="number"
+                    value={quorumPercentage}
+                    onChange={(e) => setQuorumPercentage(e.target.value)}
+                    min="1"
+                    max="100"
+                    className="w-full border border-gray-200 rounded-xl px-4 py-2.5 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                  />
+                  <p className="text-xs text-gray-400 mt-1">Min vote %</p>
                 </div>
               </div>
 
