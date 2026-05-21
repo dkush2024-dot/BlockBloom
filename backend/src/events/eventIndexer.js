@@ -197,6 +197,9 @@ async function handleVoteCast(daoAddress, proposalId, voter, optionIndex, weight
     if (!exists) {
       emitToDAO(daoAddress, 'vote:cast', vote.toObject());
       emitGlobal('vote:cast', vote.toObject());
+      
+      const redis = require('../config/redis');
+      await redis.del('leaderboard');
     }
   } catch (error) {
     logger.error('Error handling VoteCast event:', error);
@@ -236,6 +239,7 @@ async function handleProposalExecuted(daoAddress, proposalId) {
         await proposal.save();
         logger.info(`✅ Proposal #${proposalId} executed`);
         emitToDAO(daoAddress, 'proposal:updated', proposal.toObject());
+        emitToDAO(daoAddress, 'proposal:executed', { proposalId });
     }
   } catch (error) {
     logger.error('Error handling ProposalExecuted event:', error);
@@ -415,4 +419,3 @@ async function stopEventIndexer() {
 
 module.exports = { startEventIndexer, stopEventIndexer };
 
-module.exports = { startEventIndexer, stopEventIndexer };

@@ -60,6 +60,10 @@ class VoteService {
    * Returns an array of { voter, totalVotes, totalWeight }.
    */
   async getLeaderboard(limit = 10) {
+    const redis = require('../config/redis');
+    const cached = await redis.get('leaderboard');
+    if (cached) return JSON.parse(cached);
+
     const leaderboard = await Vote.aggregate([
       {
         $group: {
@@ -79,6 +83,8 @@ class VoteService {
       { $sort: { totalVotes: -1 } },
       { $limit: limit },
     ]);
+
+    await redis.setEx('leaderboard', 300, JSON.stringify(leaderboard)); // cache 5 min
 
     return leaderboard;
   }

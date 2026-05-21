@@ -7,5 +7,6 @@ const DAO = require('./DAO');
 const Proposal = require('./Proposal');
 const Vote = require('./Vote');
 const SyncState = require('./SyncState');
+const DraftProposal = require('./DraftProposal');
 
-module.exports = { DAO, Proposal, Vote, SyncState };
+module.exports = { DAO, Proposal, Vote, SyncState, DraftProposal };

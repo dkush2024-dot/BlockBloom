@@ -79,13 +79,31 @@ class ProposalService {
    * This can be called by a cron job or on-demand.
    */
   async closeExpiredProposals() {
+    const expiredProposals = await Proposal.find({
+      status: 'active',
+      endTime: { $lte: new Date() },
+    });
+
+    if (expiredProposals.length === 0) {
+      return { closedCount: 0 };
+    }
+
+    const ids = expiredProposals.map(p => p._id);
+
     const result = await Proposal.updateMany(
-      {
-        status: 'active',
-        endTime: { $lte: new Date() },
-      },
+      { _id: { $in: ids } },
       { $set: { status: 'closed' } }
     );
+
+    const { getIO } = require('../websocket/socketManager');
+    const io = getIO();
+
+    for (const p of expiredProposals) {
+      io.emit('proposal:closed', {
+        proposalId: p.proposalId,
+        daoAddress: p.daoAddress
+      });
+    }
 
     return { closedCount: result.modifiedCount };
   }

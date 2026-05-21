@@ -12,6 +12,7 @@ const daoRoutes = require('./daoRoutes');
 const proposalRoutes = require('./proposalRoutes');
 const voteRoutes = require('./voteRoutes');
 const authRoutes = require('./authRoutes');
+const draftRoutes = require('./draftRoutes');
 
 // Health check endpoint — useful for load balancers and monitoring
 router.get('/health', (req, res) => {
@@ -28,5 +29,6 @@ router.use('/daos', daoRoutes);
 router.use('/proposals', proposalRoutes);
 router.use('/votes', voteRoutes);
 router.use('/auth', authRoutes);
+router.use('/drafts', draftRoutes);
 
 module.exports = router;
