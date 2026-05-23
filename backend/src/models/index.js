@@ -8,5 +8,7 @@ const Proposal = require('./Proposal');
 const Vote = require('./Vote');
 const SyncState = require('./SyncState');
 const DraftProposal = require('./DraftProposal');
+const ChatSession = require('./ChatSession');
+const GovernanceDoc = require('./GovernanceDoc');
 
-module.exports = { DAO, Proposal, Vote, SyncState, DraftProposal };
+module.exports = { DAO, Proposal, Vote, SyncState, DraftProposal, ChatSession, GovernanceDoc };

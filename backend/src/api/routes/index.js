@@ -13,6 +13,7 @@ const proposalRoutes = require('./proposalRoutes');
 const voteRoutes = require('./voteRoutes');
 const authRoutes = require('./authRoutes');
 const draftRoutes = require('./draftRoutes');
+const aiRoutes = require('./aiRoutes');
 
 // Health check endpoint — useful for load balancers and monitoring
 router.get('/health', (req, res) => {
@@ -30,5 +31,6 @@ router.use('/proposals', proposalRoutes);
 router.use('/votes', voteRoutes);
 router.use('/auth', authRoutes);
 router.use('/drafts', draftRoutes);
+router.use('/ai', aiRoutes);
 
 module.exports = router;
