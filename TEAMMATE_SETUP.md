@@ -14,7 +14,8 @@
 ## 🔁 Step 0 — Pull Latest Code
 
 ```bash
-git pull origin nikhil/dev
+git checkout main
+git pull origin main
 ```
 
 ---
