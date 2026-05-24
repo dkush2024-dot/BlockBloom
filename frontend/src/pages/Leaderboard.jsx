@@ -1,7 +1,8 @@
 import { useState, useEffect } from "react";
 import { Link } from "react-router-dom";
-import { BrowserProvider } from "ethers";
 import { io } from "socket.io-client";
+import { useAccount } from "wagmi";
+import { useConnectModal } from "@rainbow-me/rainbowkit";
 
 const API_BASE = import.meta.env.VITE_API_BASE || "http://localhost:5000/api";
 
@@ -9,11 +10,11 @@ function Leaderboard() {
   const [leaders, setLeaders] = useState([]);
   const [loading, setLoading] = useState(true);
   const [stats, setStats] = useState(null);
-  const [account, setAccount] = useState(null);
+  const { address: account } = useAccount();
+  const { openConnectModal } = useConnectModal();
 
   useEffect(() => {
     loadData();
-    checkWallet();
 
     // Setup Socket.IO for real-time leaderboard updates
     const socket = io(API_BASE.replace("/api", ""));
@@ -25,58 +26,10 @@ function Leaderboard() {
       loadData();
     });
 
-    // Setup MetaMask account change listener
-    let handleAccountsChanged;
-    if (window.ethereum) {
-      handleAccountsChanged = (accounts) => {
-        console.log("MetaMask accounts changed on Leaderboard:", accounts);
-        if (accounts.length > 0) {
-          setAccount(accounts[0]);
-        } else {
-          setAccount(null);
-        }
-        loadData(); // Force refresh leaderboard metrics
-      };
-      window.ethereum.on("accountsChanged", handleAccountsChanged);
-    }
-
     return () => {
       socket.disconnect();
-      if (window.ethereum && handleAccountsChanged) {
-        window.ethereum.removeListener("accountsChanged", handleAccountsChanged);
-      }
     };
   }, []);
-
-  const checkWallet = async () => {
-    if (window.ethereum) {
-      try {
-        const provider = new BrowserProvider(window.ethereum);
-        const accounts = await provider.send("eth_accounts", []);
-        if (accounts.length > 0) {
-          setAccount(accounts[0]);
-        }
-      } catch (err) {
-        console.error("Failed to check wallet:", err);
-      }
-    }
-  };
-
-  const connectWallet = async () => {
-    if (!window.ethereum) {
-      alert("MetaMask is required to connect wallet.");
-      return;
-    }
-    try {
-      const provider = new BrowserProvider(window.ethereum);
-      const accounts = await provider.send("eth_requestAccounts", []);
-      if (accounts.length > 0) {
-        setAccount(accounts[0]);
-      }
-    } catch (err) {
-      console.error("Failed to connect wallet:", err);
-    }
-  };
 
   const loadData = async () => {
     setLoading(true);
@@ -113,30 +66,30 @@ function Leaderboard() {
             DAOs
           </Link>
           <span>→</span>
-          <span className="text-gray-700 font-medium">Leaderboard</span>
+          <span className="text-gray-700 dark:text-slate-300 font-medium">Leaderboard</span>
         </div>
         <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
           <div>
-            <h1 className="text-3xl font-extrabold text-gray-900 tracking-tight mb-2">
+            <h1 className="text-3xl font-extrabold text-gray-900 dark:text-white tracking-tight mb-2">
               🏆 Voter Leaderboard
             </h1>
-            <p className="text-gray-500">
+            <p className="text-gray-500 dark:text-slate-400">
               Top governance participants across all BlockBloom DAOs.
             </p>
           </div>
           
           {/* Active Wallet Status */}
-          <div className="bg-white border border-gray-200 px-4 py-3 rounded-2xl flex items-center gap-3 shadow-sm self-start md:self-auto">
-            <div className={`w-2.5 h-2.5 rounded-full ${account ? 'bg-green-500 animate-pulse' : 'bg-gray-300'}`}></div>
+          <div className="bg-white dark:bg-[#151b2c] border border-gray-200 dark:border-slate-800 px-4 py-3 rounded-2xl flex items-center gap-3 shadow-sm self-start md:self-auto transition-colors duration-300">
+            <div className={`w-2.5 h-2.5 rounded-full ${account ? 'bg-green-500 animate-pulse' : 'bg-gray-300 dark:bg-slate-700'}`}></div>
             {account ? (
               <div className="text-xs">
                 <p className="font-semibold text-gray-400 uppercase tracking-wider text-[10px]">Active Wallet</p>
-                <p className="font-mono font-bold text-gray-800">{formatAddr(account)}</p>
+                <p className="font-mono font-bold text-gray-800 dark:text-slate-200">{formatAddr(account)}</p>
               </div>
             ) : (
               <button 
-                onClick={connectWallet}
-                className="text-xs font-bold text-indigo-600 hover:text-indigo-700 transition-colors"
+                onClick={openConnectModal}
+                className="text-xs font-bold text-indigo-600 hover:text-indigo-700 dark:text-indigo-400 dark:hover:text-indigo-300 transition-colors"
               >
                 Connect Wallet
               </button>
@@ -149,27 +102,27 @@ function Leaderboard() {
       {account && !loading && (
         <div className="mb-8">
           {userRecord ? (
-            <div className="bg-gradient-to-r from-indigo-50 to-purple-50 border border-indigo-100 rounded-2xl p-5 flex flex-col sm:flex-row items-center justify-between gap-4 shadow-sm">
+            <div className="bg-gradient-to-r from-indigo-50 to-purple-50 dark:from-indigo-950/20 dark:to-purple-950/20 border border-indigo-100 dark:border-indigo-900/30 rounded-2xl p-5 flex flex-col sm:flex-row items-center justify-between gap-4 shadow-sm">
               <div className="flex items-center gap-4 text-center sm:text-left">
                 <div className="w-12 h-12 rounded-xl bg-indigo-600 text-white flex items-center justify-center text-xl font-bold shadow-md">
                   #{userRankIdx + 1}
                 </div>
                 <div>
-                  <h3 className="text-sm font-bold text-gray-900">Your Leaderboard Standing</h3>
-                  <p className="text-xs text-gray-500 mt-0.5">
-                    You've cast <span className="font-bold text-indigo-600">{userRecord.totalVotes} votes</span> across <span className="font-bold text-indigo-600">{userRecord.daosParticipated} DAO{userRecord.daosParticipated !== 1 && "s"}</span>.
+                  <h3 className="text-sm font-bold text-gray-900 dark:text-white">Your Leaderboard Standing</h3>
+                  <p className="text-xs text-gray-500 dark:text-slate-400 mt-0.5">
+                    You've cast <span className="font-bold text-indigo-600 dark:text-indigo-400">{userRecord.totalVotes} votes</span> across <span className="font-bold text-indigo-600 dark:text-indigo-400">{userRecord.daosParticipated} DAO{userRecord.daosParticipated !== 1 && "s"}</span>.
                   </p>
                 </div>
               </div>
-              <span className="inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold bg-indigo-100 text-indigo-800 border border-indigo-200">
+              <span className="inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold bg-indigo-105 text-indigo-800 dark:bg-indigo-950/40 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-900/40">
                 Active Participator
               </span>
             </div>
           ) : (
-            <div className="bg-gray-50 border border-gray-200 rounded-2xl p-5 flex flex-col sm:flex-row items-center justify-between gap-4 shadow-sm">
+            <div className="bg-gray-50 dark:bg-[#151b2c]/50 border border-gray-200 dark:border-slate-800 rounded-2xl p-5 flex flex-col sm:flex-row items-center justify-between gap-4 shadow-sm transition-colors duration-300">
               <div>
-                <h3 className="text-sm font-bold text-gray-700">Not Ranked Yet</h3>
-                <p className="text-xs text-gray-500 mt-0.5">
+                <h3 className="text-sm font-bold text-gray-700 dark:text-slate-200">Not Ranked Yet</h3>
+                <p className="text-xs text-gray-500 dark:text-slate-400 mt-0.5">
                   You haven't cast any governance votes with this wallet address yet.
                 </p>
               </div>
@@ -214,27 +167,27 @@ function Leaderboard() {
           <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-indigo-600"></div>
         </div>
       ) : leaders.length === 0 ? (
-        <div className="bg-white rounded-3xl border border-gray-200 p-12 text-center shadow-sm">
-          <div className="w-16 h-16 bg-gray-100 rounded-2xl flex items-center justify-center mx-auto mb-4 text-2xl">
+        <div className="bg-white dark:bg-[#151b2c] rounded-3xl border border-gray-200 dark:border-slate-800 p-12 text-center shadow-sm transition-colors duration-300">
+          <div className="w-16 h-16 bg-gray-100 dark:bg-slate-800 rounded-2xl flex items-center justify-center mx-auto mb-4 text-2xl">
             🗳️
           </div>
-          <h3 className="text-lg font-bold text-gray-900 mb-1">
+          <h3 className="text-lg font-bold text-gray-900 dark:text-white mb-1">
             No votes yet
           </h3>
-          <p className="text-gray-500 mb-6">
+          <p className="text-gray-500 dark:text-slate-400 mb-6">
             Be the first to cast a vote and claim the top spot!
           </p>
           <Link
             to="/"
-            className="bg-indigo-50 text-indigo-700 hover:bg-indigo-100 font-semibold py-2 px-6 rounded-lg transition-colors"
+            className="bg-indigo-50 dark:bg-indigo-950/40 text-indigo-700 dark:text-indigo-400 hover:bg-indigo-100 dark:hover:bg-indigo-950/60 font-semibold py-2 px-6 rounded-lg transition-colors"
           >
             Browse DAOs
           </Link>
         </div>
       ) : (
-        <div className="bg-white rounded-3xl border border-gray-200 overflow-hidden shadow-sm">
+        <div className="bg-white dark:bg-[#151b2c] rounded-3xl border border-gray-200 dark:border-slate-800 overflow-hidden shadow-sm transition-colors duration-300">
           {/* Table Header */}
-          <div className="grid grid-cols-12 gap-4 px-6 py-4 bg-gray-50 border-b border-gray-200 text-xs font-semibold text-gray-500 uppercase tracking-wider">
+          <div className="grid grid-cols-12 gap-4 px-6 py-4 bg-gray-50 dark:bg-slate-800/40 border-b border-gray-200 dark:border-slate-800 text-xs font-semibold text-gray-500 dark:text-slate-450 uppercase tracking-wider transition-colors duration-300">
             <div className="col-span-1 text-center">Rank</div>
             <div className="col-span-5">Wallet Address</div>
             <div className="col-span-3 text-center">Votes Cast</div>
@@ -248,11 +201,11 @@ function Leaderboard() {
               <Link
                 key={leader.voter}
                 to={`/profile/${leader.voter}`}
-                className={`grid grid-cols-12 gap-4 px-6 py-5 items-center border-b border-gray-100 last:border-b-0 hover:bg-indigo-50/40 transition-colors cursor-pointer ${
+                className={`grid grid-cols-12 gap-4 px-6 py-5 items-center border-b border-gray-100 dark:border-slate-800 last:border-b-0 hover:bg-indigo-50/40 dark:hover:bg-indigo-950/20 transition-colors cursor-pointer ${
                   isCurrentUser
-                    ? "bg-indigo-50/30 font-bold border-l-4 border-l-indigo-600"
+                    ? "bg-indigo-50/30 dark:bg-indigo-950/10 font-bold border-l-4 border-l-indigo-600"
                     : idx < 3
-                    ? "bg-gradient-to-r from-yellow-50/40 to-transparent"
+                    ? "bg-gradient-to-r from-yellow-50/40 dark:from-yellow-950/5 to-transparent"
                     : ""
                 }`}
               >
@@ -261,7 +214,7 @@ function Leaderboard() {
                   {idx < 3 ? (
                     <span className="text-2xl">{medals[idx]}</span>
                   ) : (
-                    <span className="text-sm font-bold text-gray-400">
+                    <span className="text-sm font-bold text-gray-400 dark:text-slate-500">
                       #{idx + 1}
                     </span>
                   )}
@@ -286,18 +239,18 @@ function Leaderboard() {
                       {leader.voter.slice(2, 4).toUpperCase()}
                     </div>
                     <div>
-                      <p className={`text-sm font-mono ${isCurrentUser ? "text-indigo-600 font-extrabold" : "text-gray-900"}`}>
+                      <p className={`text-sm font-mono ${isCurrentUser ? "text-indigo-600 dark:text-indigo-450 font-extrabold" : "text-gray-900 dark:text-white"}`}>
                         {formatAddr(leader.voter)}
-                        {isCurrentUser && <span className="text-xs font-bold text-indigo-500 ml-1.5">(You)</span>}
+                        {isCurrentUser && <span className="text-xs font-bold text-indigo-500 dark:text-indigo-400 ml-1.5">(You)</span>}
                       </p>
-                      <p className="text-xs text-gray-400">View profile →</p>
+                      <p className="text-xs text-gray-400 dark:text-slate-500">View profile →</p>
                     </div>
                   </div>
                 </div>
 
                 {/* Votes */}
                 <div className="col-span-3 text-center">
-                  <span className="text-lg font-bold text-gray-900">
+                  <span className="text-lg font-bold text-gray-900 dark:text-white">
                     {leader.totalVotes}
                   </span>
                 </div>
@@ -307,7 +260,7 @@ function Leaderboard() {
                   <span className={`inline-flex items-center px-3 py-1 rounded-full text-sm font-semibold border ${
                     isCurrentUser 
                       ? 'bg-indigo-600 text-white border-indigo-700' 
-                      : 'bg-indigo-50 text-indigo-700 border-indigo-100'
+                      : 'bg-indigo-50 dark:bg-indigo-950/40 text-indigo-700 dark:text-indigo-400 border-indigo-100 dark:border-indigo-900/40'
                   }`}>
                     {leader.daosParticipated} DAO{leader.daosParticipated !== 1 && "s"}
                   </span>

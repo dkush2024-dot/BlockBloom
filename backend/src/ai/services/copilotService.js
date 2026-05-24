@@ -27,6 +27,7 @@ const { generateText, streamText } = require('./geminiService');
 const { classifyIntent, classifyByKeywords } = require('./intentRouter');
 const { buildFullContext } = require('../context/contextBuilder');
 const { COPILOT_SYSTEM_PROMPT, fillTemplate } = require('../prompts/templates');
+const { Proposal } = require('../../models');
 const logger = require('../../config/logger');
 
 /**
@@ -40,8 +41,9 @@ const logger = require('../../config/logger');
  * @param {string} params.sessionId - Session ID for memory
  * @returns {Promise<{ reply: string, intent: Object, context: Object }>}
  */
-async function chat({ message, daoAddress, chatHistory = [], sessionId }) {
+async function chat({ message, daoAddress, userAddress, chatHistory = [], sessionId }) {
   logger.info(`[Copilot] Processing message: "${message.substring(0, 80)}"`);
+  if (userAddress) logger.debug(`[Copilot] User wallet: ${userAddress}`);
 
   // Step 1: Classify the user's intent
   // Use keyword classifier first (fast), then AI classifier for ambiguous cases
@@ -60,10 +62,25 @@ async function chat({ message, daoAddress, chatHistory = [], sessionId }) {
   let governanceContext = '';
   try {
     if (daoAddress && intent.intent !== 'off_topic') {
+      let proposalId = intent.entities?.proposalId || null;
+
+      // Default to the single proposal if there is only one in this DAO
+      if (!proposalId && (intent.intent === 'proposal_explain' || intent.intent === 'proposal_status' || intent.intent === 'voting_help')) {
+        try {
+          const dbProposals = await Proposal.find({ daoAddress: daoAddress.toLowerCase() });
+          if (dbProposals.length === 1) {
+            proposalId = dbProposals[0].proposalId;
+          }
+        } catch (err) {
+          logger.warn('[Copilot] Failed to query single proposal fallback:', err.message);
+        }
+      }
+
       governanceContext = await buildFullContext({
         daoAddress,
-        proposalId: intent.entities?.proposalId || null,
-        includeTreasury: intent.intent === 'treasury_query',
+        userAddress: userAddress || null,
+        proposalId,
+        includeTreasury: true,
       });
     }
   } catch (error) {
@@ -88,7 +105,7 @@ async function chat({ message, daoAddress, chatHistory = [], sessionId }) {
   // Step 5: Generate response
   const { text } = await generateText(fullPrompt, {
     temperature: 0.4, // Slightly creative for conversation
-    maxOutputTokens: 1024,
+    maxOutputTokens: 2048,
   });
 
   return {
@@ -108,7 +125,7 @@ async function chat({ message, daoAddress, chatHistory = [], sessionId }) {
  * @param {Object} params - Same as chat()
  * @returns {AsyncGenerator<string>} - Yields text chunks
  */
-async function* streamChat({ message, daoAddress, chatHistory = [] }) {
+async function* streamChat({ message, daoAddress, userAddress, chatHistory = [] }) {
   // Intent classification (use keyword for speed in streaming)
   const intent = classifyByKeywords(message);
 
@@ -116,10 +133,25 @@ async function* streamChat({ message, daoAddress, chatHistory = [] }) {
   let governanceContext = '';
   try {
     if (daoAddress && intent.intent !== 'off_topic') {
+      let proposalId = intent.entities?.proposalId || null;
+
+      // Default to the single proposal if there is only one in this DAO
+      if (!proposalId && (intent.intent === 'proposal_explain' || intent.intent === 'proposal_status' || intent.intent === 'voting_help')) {
+        try {
+          const dbProposals = await Proposal.find({ daoAddress: daoAddress.toLowerCase() });
+          if (dbProposals.length === 1) {
+            proposalId = dbProposals[0].proposalId;
+          }
+        } catch (err) {
+          // ignore in streaming fallback
+        }
+      }
+
       governanceContext = await buildFullContext({
         daoAddress,
-        proposalId: intent.entities?.proposalId || null,
-        includeTreasury: intent.intent === 'treasury_query',
+        userAddress: userAddress || null,
+        proposalId,
+        includeTreasury: true,
       });
     }
   } catch {

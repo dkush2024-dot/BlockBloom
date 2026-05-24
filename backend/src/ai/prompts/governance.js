@@ -37,10 +37,11 @@ const {
  * @returns {string} - Formatted proposal string for prompt injection
  */
 function formatProposalForPrompt(proposal) {
+  const title = proposal.title || (proposal.description ? (proposal.description.length > 60 ? proposal.description.substring(0, 60) + '...' : proposal.description) : 'Untitled');
   return `
 --- PROPOSAL DETAILS ---
 Proposal ID: ${proposal.proposalId || proposal._id || 'Unknown'}
-Title: ${proposal.title || 'Untitled'}
+Title: ${title}
 Description: ${proposal.description || 'No description provided'}
 Proposer: ${proposal.proposer || 'Unknown'}
 DAO Address: ${proposal.daoAddress || 'Unknown'}

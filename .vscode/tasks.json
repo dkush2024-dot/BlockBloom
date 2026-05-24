@@ -1,0 +1,148 @@
+{
+	"version": "2.0.0",
+	"tasks": [
+		{
+			"label": "temp-dao-check",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/c",
+				"cd hardhat && node scripts/checkDao.js"
+			],
+			"isBackground": false,
+			"problemMatcher": []
+		},
+		{
+			"label": "temp-dao-check-2",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/c",
+				"cd hardhat && node scripts/checkDao.js"
+			],
+			"isBackground": false,
+			"problemMatcher": []
+		},
+		{
+			"label": "temp-dao-check-3",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/c",
+				"cd hardhat && node scripts/checkDao.js"
+			],
+			"isBackground": false,
+			"problemMatcher": []
+		},
+		{
+			"label": "temp-dao-check-4",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/c",
+				"cd hardhat && node scripts/checkDao.js"
+			],
+			"isBackground": false,
+			"problemMatcher": []
+		},
+		{
+			"label": "frontend-build-check",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/c",
+				"cd frontend && npm run build"
+			],
+			"isBackground": false,
+			"problemMatcher": []
+		},
+		{
+			"label": "deploy-test-dao",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/c",
+				"cd hardhat && node scripts/deployTestDao.js"
+			],
+			"isBackground": false,
+			"problemMatcher": []
+		},
+		{
+			"label": "deploy-test-dao-2",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/c",
+				"cd hardhat && npx hardhat run scripts/deployTestDao.js --network localhost"
+			],
+			"isBackground": false,
+			"problemMatcher": []
+		},
+		{
+			"label": "deploy-test-dao-3",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/c",
+				"cd hardhat && npx hardhat run scripts/deployTestDao.js --network localhost"
+			],
+			"isBackground": false,
+			"problemMatcher": []
+		},
+		{
+			"label": "deploy-test-dao-4",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/c",
+				"cd hardhat && npx hardhat run scripts/deployTestDao.js --network localhost"
+			],
+			"isBackground": false,
+			"problemMatcher": []
+		},
+		{
+			"label": "check-addrs",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/c",
+				"cd hardhat && node scripts/checkAddrs.js"
+			],
+			"isBackground": false,
+			"problemMatcher": []
+		},
+		{
+			"label": "check-addrs-2",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/c",
+				"cd hardhat && node scripts/checkAddrs.js"
+			],
+			"isBackground": false,
+			"problemMatcher": []
+		},
+		{
+			"label": "verify-deployed",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/c",
+				"cd hardhat && node scripts/verifyDeployed.js"
+			],
+			"isBackground": false,
+			"problemMatcher": []
+		},
+		{
+			"label": "verify-deployed-2",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/c",
+				"cd hardhat && node scripts/verifyDeployed.js"
+			],
+			"isBackground": false,
+			"problemMatcher": []
+		}
+	]
+}

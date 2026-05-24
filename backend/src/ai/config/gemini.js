@@ -49,11 +49,33 @@ function getModel(opts = {}) {
     maxOutputTokens: opts.maxOutputTokens ?? 2048,
   };
 
+  logger.debug(`[GeminiConfig] getModel with config: ${JSON.stringify(generationConfig)}`);
+
   if (opts.responseMimeType) {
     generationConfig.responseMimeType = opts.responseMimeType;
   }
 
-  return client.getGenerativeModel({ model: GEMINI_MODEL, generationConfig });
+  const { HarmCategory, HarmBlockThreshold } = require('@google/generative-ai');
+  const safetySettings = [
+    {
+      category: HarmCategory.HARM_CATEGORY_HARASSMENT,
+      threshold: HarmBlockThreshold.BLOCK_NONE,
+    },
+    {
+      category: HarmCategory.HARM_CATEGORY_HATE_SPEECH,
+      threshold: HarmBlockThreshold.BLOCK_NONE,
+    },
+    {
+      category: HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT,
+      threshold: HarmBlockThreshold.BLOCK_NONE,
+    },
+    {
+      category: HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT,
+      threshold: HarmBlockThreshold.BLOCK_NONE,
+    },
+  ];
+
+  return client.getGenerativeModel({ model: GEMINI_MODEL, generationConfig, safetySettings });
 }
 
 /** Returns a model that only outputs valid JSON. */

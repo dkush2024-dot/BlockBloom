@@ -79,24 +79,31 @@ async function classifyIntent(message) {
  */
 function classifyByKeywords(message) {
   const lower = message.toLowerCase();
+  const entities = {};
+
+  // Regex to match "proposal #1", "proposal 1", "prop 1", "proposalId 1", etc.
+  const propMatch = message.match(/(?:proposal|prop|#)\s*#?\s*(\d+)/i);
+  if (propMatch) {
+    entities.proposalId = propMatch[1];
+  }
 
   if (/proposal|explain|what does|break down/i.test(lower)) {
-    return { intent: 'proposal_explain', confidence: 0.7 };
+    return { intent: 'proposal_explain', confidence: 0.7, entities };
   }
   if (/status|passed|failed|active|expired/i.test(lower)) {
-    return { intent: 'proposal_status', confidence: 0.7 };
+    return { intent: 'proposal_status', confidence: 0.7, entities };
   }
   if (/treasury|balance|funds|spending|budget/i.test(lower)) {
-    return { intent: 'treasury_query', confidence: 0.7 };
+    return { intent: 'treasury_query', confidence: 0.7, entities };
   }
   if (/vote|voting|should i|support|oppose/i.test(lower)) {
-    return { intent: 'voting_help', confidence: 0.7 };
+    return { intent: 'voting_help', confidence: 0.7, entities };
   }
   if (/governance|dao|delegate|quorum/i.test(lower)) {
-    return { intent: 'governance_general', confidence: 0.6 };
+    return { intent: 'governance_general', confidence: 0.6, entities };
   }
 
-  return { intent: 'governance_general', confidence: 0.3 };
+  return { intent: 'governance_general', confidence: 0.3, entities };
 }
 
 module.exports = {

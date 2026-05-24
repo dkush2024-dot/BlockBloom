@@ -247,6 +247,31 @@ async function handleProposalExecuted(daoAddress, proposalId) {
 }
 
 /**
+ * Handles ProposalCancelled event
+ */
+async function handleProposalCancelled(daoAddress, proposalId, event) {
+  try {
+    const txReceipt = event.log || event;
+    const provider = getProvider();
+    const block = await provider.getBlock(txReceipt.blockNumber);
+    const cancelTime = new Date((block.timestamp - 1) * 1000);
+
+    const proposal = await Proposal.findOneAndUpdate(
+      { daoAddress: daoAddress.toLowerCase(), proposalId: proposalId.toString() },
+      { status: 'closed', endTime: cancelTime },
+      { new: true }
+    );
+    if (proposal) {
+      logger.info(`🚫 Proposal #${proposalId} cancelled (endTime set to ${cancelTime})`);
+      emitToDAO(daoAddress, 'proposal:updated', proposal.toObject());
+      emitToDAO(daoAddress, 'proposal:cancelled', { proposalId });
+    }
+  } catch (error) {
+    logger.error('Error handling ProposalCancelled event:', error);
+  }
+}
+
+/**
  * Handles TransactionExecuted from Treasury (Financial proposal finalized)
  */
 async function handleTransactionExecuted(treasuryAddress, daoAddress, txId) {
@@ -350,6 +375,13 @@ async function pollBlockchain() {
           for (const ev of eEvents) {
             const [proposalId] = ev.args;
             await handleProposalExecuted(daoAddress, proposalId);
+          }
+
+          // ProposalCancelled
+          const cEvents = await govContract.queryFilter('ProposalCancelled', startBlock, currentBlock);
+          for (const ev of cEvents) {
+            const [proposalId] = ev.args;
+            await handleProposalCancelled(daoAddress, proposalId, ev);
           }
 
           // Treasury TransactionExecuted
