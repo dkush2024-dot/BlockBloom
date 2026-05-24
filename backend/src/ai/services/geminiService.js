@@ -42,6 +42,15 @@ async function generateText(prompt, opts = {}) {
     const response = result.response;
     const text = response.text();
 
+    // Log candidate details for debugging
+    if (response.candidates && response.candidates.length > 0) {
+      const candidate = response.candidates[0];
+      logger.debug(`[GeminiService] Candidate finishReason: ${candidate.finishReason}`);
+      if (candidate.safetyRatings) {
+        logger.debug(`[GeminiService] Safety ratings: ${JSON.stringify(candidate.safetyRatings)}`);
+      }
+    }
+
     // Log token usage if available
     const usage = response.usageMetadata;
     if (usage) {
@@ -54,6 +63,10 @@ async function generateText(prompt, opts = {}) {
     };
   } catch (error) {
     logger.error('[GeminiService] Text generation failed:', error.message);
+    const msg = error.message.toLowerCase();
+    if (msg.includes('429') || msg.includes('quota') || msg.includes('too many requests')) {
+      throw new Error('Gemini API rate limit exceeded (20 requests per minute on the free tier). Please wait a few seconds and try again.');
+    }
     throw new Error(`AI generation failed: ${error.message}`);
   }
 }

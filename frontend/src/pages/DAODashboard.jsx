@@ -1,14 +1,19 @@
 import { useState, useEffect } from "react";
 import { useParams, Link } from "react-router-dom";
-import { BrowserProvider, Contract, formatEther, parseEther } from "ethers";
+import { Contract, formatEther, parseEther } from "ethers";
 import { io } from "socket.io-client";
+import { useAccount } from "wagmi";
+import { useConnectModal } from "@rainbow-me/rainbowkit";
 import contracts from "../contracts.json";
+import { getEthersProvider, getEthersSigner } from "../utils/adapters";
 
 const API_BASE = import.meta.env.VITE_API_BASE || "http://localhost:5000/api";
 const EXPECTED_CHAIN_ID = import.meta.env.VITE_REQUIRED_CHAIN_ID || "31337";
 
 function DAODashboard() {
   const { address } = useParams();
+  const { address: connectedAddress, isConnected } = useAccount();
+  const { openConnectModal } = useConnectModal();
   const [daoName, setDaoName] = useState("");
   const [proposals, setProposals] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -43,6 +48,30 @@ function DAODashboard() {
   const [tempKey, setTempKey] = useState("");
   const [pendingSummaryArgs, setPendingSummaryArgs] = useState(null);
 
+  // AI Chatbot States
+  const [showChat, setShowChat] = useState(false);
+  const [chatMessages, setChatMessages] = useState(() => {
+    try {
+      const saved = sessionStorage.getItem(`chat_history_${address}`);
+      return saved ? JSON.parse(saved) : [];
+    } catch {
+      return [];
+    }
+  });
+  const [chatInput, setChatInput] = useState("");
+  const [chatLoading, setChatLoading] = useState(false);
+  const [chatSessionId, setChatSessionId] = useState(() => {
+    return localStorage.getItem(`chat_session_${address}_${connectedAddress}`) || "";
+  });
+
+  useEffect(() => {
+    try {
+      sessionStorage.setItem(`chat_history_${address}`, JSON.stringify(chatMessages));
+    } catch (e) {
+      console.warn("Failed to save chat history to sessionStorage", e);
+    }
+  }, [chatMessages, address]);
+
   useEffect(() => {
     connectAndLoad();
 
@@ -70,43 +99,21 @@ function DAODashboard() {
     socket.on("proposal:executed", () => connectAndLoad());
     socket.on("proposal:closed", () => connectAndLoad());
 
-    // Handle MetaMask account and chain changes dynamically
-    let handleAccountsChanged;
-    let handleChainChanged;
-
-    if (window.ethereum) {
-      handleAccountsChanged = (accounts) => {
-        console.log("MetaMask accounts changed on Dashboard:", accounts);
-        connectAndLoad();
-      };
-      handleChainChanged = (chainId) => {
-        console.log("MetaMask network chain changed on Dashboard:", chainId);
-        window.location.reload();
-      };
-
-      window.ethereum.on("accountsChanged", handleAccountsChanged);
-      window.ethereum.on("chainChanged", handleChainChanged);
-    }
-
     return () => {
       socket.disconnect();
-      if (window.ethereum) {
-        if (handleAccountsChanged) window.ethereum.removeListener("accountsChanged", handleAccountsChanged);
-        if (handleChainChanged) window.ethereum.removeListener("chainChanged", handleChainChanged);
-      }
     };
-  }, [address]);
+  }, [address, connectedAddress]);
 
   const getProvider = async () => {
-    if (!window.ethereum) {
-      throw new Error("MetaMask is required to use BlockBloom.");
+    const provider = getEthersProvider();
+    if (!provider) {
+      throw new Error("No Web3 provider found. Please connect your wallet.");
     }
 
-    const provider = new BrowserProvider(window.ethereum);
     const network = await provider.getNetwork();
     if (String(network.chainId) !== EXPECTED_CHAIN_ID) {
       throw new Error(
-        `Please switch MetaMask to the local Hardhat network (chainId ${EXPECTED_CHAIN_ID}). Current chainId: ${network.chainId}.`
+        `Please switch your wallet to the correct network (chainId ${EXPECTED_CHAIN_ID}). Current chainId: ${network.chainId}.`
       );
     }
 
@@ -124,22 +131,37 @@ function DAODashboard() {
     try {
       setErrorMessage("");
       const provider = await getProvider();
-      const signer = await provider.getSigner();
-      const addressString = await signer.getAddress();
-      setAccount(addressString);
+      const signer = await getEthersSigner();
       
-      // Load user token details
-      await ensureContractDeployed(provider, contracts.BloomToken.address, "BloomToken");
-      const token = new Contract(contracts.BloomToken.address, contracts.BloomToken.abi, provider);
-      const bal = await token.balanceOf(addressString);
-      const votes = await token.getVotes(addressString);
-      setTokenBalance(parseFloat(formatEther(bal)).toLocaleString(undefined, { maximumFractionDigits: 2 }));
-      setVotingPower(parseFloat(formatEther(votes)).toLocaleString(undefined, { maximumFractionDigits: 2 }));
+      if (signer) {
+        const addressString = await signer.getAddress();
+        setAccount(addressString);
+        
+        // Load user token details
+        await ensureContractDeployed(provider, contracts.BloomToken.address, "BloomToken");
+        const token = new Contract(contracts.BloomToken.address, contracts.BloomToken.abi, provider);
+        const bal = await token.balanceOf(addressString);
+        const votes = await token.getVotes(addressString);
+        setTokenBalance(parseFloat(formatEther(bal)).toLocaleString(undefined, { maximumFractionDigits: 2 }));
+        setVotingPower(parseFloat(formatEther(votes)).toLocaleString(undefined, { maximumFractionDigits: 2 }));
+      } else {
+        setAccount(null);
+        setTokenBalance("0");
+        setVotingPower("0");
+      }
 
       await loadDAO(provider);
     } catch (err) {
       setErrorMessage(err?.message || "Unable to connect to the DAO.");
       console.error(err);
+      
+      // Try to load read-only provider
+      try {
+        const provider = getEthersProvider();
+        if (provider) await loadDAO(provider);
+      } catch (e) {
+        console.warn("Read-only fallback failed", e);
+      }
     }
   };
 
@@ -170,6 +192,65 @@ function DAODashboard() {
         );
       }
 
+      const decorateWithQuorumAndFinalized = async (propsList) => {
+        const tokenAddress = await gov.bloomToken();
+        const token = new Contract(tokenAddress, contracts.BloomToken.abi, provider);
+        const quorumPercentage = Number(await gov.quorumPercentage());
+        
+        let treasuryContract = null;
+        try {
+          const tAddr = await gov.treasury();
+          treasuryContract = new Contract(tAddr, contracts.Treasury.abi, provider);
+        } catch (e) {
+          console.warn("Could not instantiate Treasury contract", e);
+        }
+
+        return Promise.all(propsList.map(async (p) => {
+          let requiredQuorum = 0;
+          let isFinalized = p.status === 'finalized';
+          let timelockTxId = p.timelockTxId || null;
+          let executeAfter = 0;
+
+          try {
+            const snap = Number(p.snapshotBlock);
+            if (snap > 0) {
+              const supply = await token.getPastTotalSupply(snap);
+              requiredQuorum = (parseFloat(formatEther(supply)) * quorumPercentage) / 100;
+            }
+          } catch (err) {
+            console.warn(`Could not fetch past total supply for proposal #${p.id} at block ${p.snapshotBlock}:`, err);
+          }
+
+          // If it's a financial proposal and executed on-chain, and we don't know if it's finalized
+          if (p.executed && p.target && p.target !== "0x0000000000000000000000000000000000000000" && !isFinalized && treasuryContract) {
+            try {
+              if (!timelockTxId) {
+                const filter = gov.filters.ProposalQueued(p.id);
+                const events = await gov.queryFilter(filter);
+                if (events.length > 0) {
+                  timelockTxId = events[0].args.timelockTxId;
+                }
+              }
+              if (timelockTxId) {
+                const txInfo = await treasuryContract.queuedTransactions(timelockTxId);
+                isFinalized = txInfo.executed;
+                executeAfter = Number(txInfo.executeAfter);
+              }
+            } catch (err) {
+              console.warn(`Could not check finalization status for proposal #${p.id}:`, err);
+            }
+          }
+
+          return {
+            ...p,
+            requiredQuorum,
+            isFinalized,
+            timelockTxId,
+            executeAfter
+          };
+        }));
+      };
+
       // 1. Try to fetch proposals from MongoDB fast REST API first
       try {
         const response = await fetch(`${API_BASE}/proposals?daoAddress=${address}`);
@@ -180,14 +261,18 @@ function DAODashboard() {
               id: Number(p.proposalId),
               proposer: p.proposer,
               description: p.description,
+              snapshotBlock: Number(p.snapshotBlock),
               endTime: Math.floor(new Date(p.endTime).getTime() / 1000),
               executed: p.executed,
               optionNames: p.options.map(o => o.name),
               optionVotes: p.options.map(o => parseFloat(formatEther(o.voteCount))),
               target: p.target,
               value: Number(p.value),
+              status: p.status,
+              timelockTxId: p.timelockTxId,
             }));
-            setProposals(mapped);
+            const decorated = await decorateWithQuorumAndFinalized(mapped);
+            setProposals(decorated);
             return;
           }
         }
@@ -204,6 +289,7 @@ function DAODashboard() {
           id: Number(p.id),
           proposer: p.proposer,
           description: p.description,
+          snapshotBlock: Number(p.snapshotBlock),
           endTime: Number(p.endTime),
           executed: p.executed,
           optionNames: [...p.optionNames],
@@ -212,7 +298,8 @@ function DAODashboard() {
           value: Number(p.value),
         });
       }
-      setProposals(props);
+      const decorated = await decorateWithQuorumAndFinalized(props);
+      setProposals(decorated);
     } catch (err) {
       setErrorMessage(err?.message || "Error loading DAO.");
       console.error("Error loading DAO:", err);
@@ -222,6 +309,10 @@ function DAODashboard() {
   };
 
   const createProposal = async () => {
+    if (!isConnected) {
+      openConnectModal?.();
+      return;
+    }
     if (!proposalDesc.trim()) {
       alert("Please enter a proposal description.");
       return;
@@ -235,7 +326,8 @@ function DAODashboard() {
     try {
       const provider = await getProvider();
       await ensureContractDeployed(provider, address, "Governance");
-      const signer = await provider.getSigner();
+      const signer = await getEthersSigner();
+      if (!signer) throw new Error("Wallet not connected. Please connect via RainbowKit.");
       const gov = new Contract(address, contracts.Governance.abi, signer);
       const daoBloomToken = await gov.bloomToken();
       if (daoBloomToken.toLowerCase() !== contracts.BloomToken.address.toLowerCase()) {
@@ -303,22 +395,38 @@ function DAODashboard() {
   };
 
   const getProposalStatus = (proposal) => {
+    if (proposal.isFinalized || proposal.status === 'finalized') return 'executed';
+    if (proposal.executed) {
+      if (proposal.target && proposal.target !== "0x0000000000000000000000000000000000000000") {
+        return 'queued';
+      }
+      return 'executed';
+    }
+    
     const now = Date.now() / 1000;
     if (now <= proposal.endTime) return 'active';
-    if (proposal.executed) return 'executed';
     
-    const option0Won = proposal.optionVotes[0] >= Math.max(...proposal.optionVotes);
     const totalVotes = proposal.optionVotes.reduce((a, b) => a + b, 0);
+    const requiredQuorum = proposal.requiredQuorum || 0;
     
-    if (!option0Won) return 'failed';
-    if (totalVotes === 0) return 'failed';
-    return 'passed';
+    if (totalVotes < requiredQuorum) return 'quorum_not_met';
+    
+    const maxVotes = Math.max(...proposal.optionVotes);
+    const option0Won = proposal.optionVotes[0] === maxVotes && maxVotes > 0;
+    
+    if (option0Won) return 'passed';
+    return 'failed';
   };
 
   const executeProposal = async (proposalId) => {
+    if (!isConnected) {
+      openConnectModal?.();
+      return;
+    }
     try {
       const provider = await getProvider();
-      const signer = await provider.getSigner();
+      const signer = await getEthersSigner();
+      if (!signer) throw new Error("Wallet not connected.");
       const gov = new Contract(address, contracts.Governance.abi, signer);
       
       const tx = await gov.executeProposal(proposalId);
@@ -332,9 +440,14 @@ function DAODashboard() {
   };
 
   const finalizeProposal = async (proposalId) => {
+    if (!isConnected) {
+      openConnectModal?.();
+      return;
+    }
     try {
       const provider = await getProvider();
-      const signer = await provider.getSigner();
+      const signer = await getEthersSigner();
+      if (!signer) throw new Error("Wallet not connected.");
       const gov = new Contract(address, contracts.Governance.abi, signer);
       
       const tx = await gov.finalizeProposal(proposalId);
@@ -347,12 +460,39 @@ function DAODashboard() {
     }
   };
 
+  const cancelProposal = async (proposalId) => {
+    if (!isConnected) {
+      openConnectModal?.();
+      return;
+    }
+    if (!confirm("Are you sure you want to cancel this proposal? This will expire voting immediately.")) return;
+    try {
+      const provider = await getProvider();
+      const signer = await getEthersSigner();
+      if (!signer) throw new Error("Wallet not connected.");
+      const gov = new Contract(address, contracts.Governance.abi, signer);
+      
+      const tx = await gov.cancelProposal(proposalId);
+      await tx.wait();
+      
+      alert('Proposal cancelled successfully!');
+      await connectAndLoad();
+    } catch (err) {
+      alert(`Failed to cancel: ${err?.reason || err?.message}`);
+    }
+  };
+
   const fundTreasury = async () => {
+    if (!isConnected) {
+      openConnectModal?.();
+      return;
+    }
     const amt = prompt("How much ETH do you want to send to the Treasury?");
     if (!amt) return;
     try {
       const provider = await getProvider();
-      const signer = await provider.getSigner();
+      const signer = await getEthersSigner();
+      if (!signer) throw new Error("Wallet not connected.");
       const tx = await signer.sendTransaction({
         to: treasuryAddress,
         value: parseEther(amt)
@@ -366,11 +506,16 @@ function DAODashboard() {
   };
 
   const castVote = async (proposalId, optionIndex) => {
+    if (!isConnected) {
+      openConnectModal?.();
+      return;
+    }
     setVotingOn(proposalId);
     try {
       setErrorMessage("");
       const provider = await getProvider();
-      const signer = await provider.getSigner();
+      const signer = await getEthersSigner();
+      if (!signer) throw new Error("Wallet not connected.");
       const gov = new Contract(address, contracts.Governance.abi, signer);
       const tx = await gov.vote(BigInt(proposalId), BigInt(optionIndex));
       await tx.wait();
@@ -384,6 +529,16 @@ function DAODashboard() {
     } finally {
       setVotingOn(null);
     }
+  };
+
+  const getTimelockTimeRemaining = (executeAfter) => {
+    const now = Math.floor(Date.now() / 1000);
+    const diff = executeAfter - now;
+    if (diff <= 0) return null;
+    const mins = Math.floor(diff / 60);
+    const hrs = Math.floor(mins / 60);
+    if (hrs > 0) return `${hrs}h ${mins % 60}m`;
+    return `${mins}m`;
   };
 
   const getTimeRemaining = (endTime) => {
@@ -526,6 +681,50 @@ function DAODashboard() {
     }
   };
 
+  const handleSendChatMessage = async (e) => {
+    e.preventDefault();
+    if (!chatInput.trim() || chatLoading) return;
+    
+    const userMsg = chatInput.trim();
+    setChatInput("");
+    setChatMessages((prev) => [...prev, { sender: 'user', text: userMsg }]);
+    setChatLoading(true);
+
+    try {
+      const res = await fetch(`${API_BASE}/ai/copilot/chat`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          message: userMsg,
+          sessionId: chatSessionId || undefined,
+          daoAddress: address,
+          userAddress: connectedAddress || "0x0000000000000000000000000000000000000000"
+        })
+      });
+
+      const data = await res.json();
+      if (data.success) {
+        setChatMessages((prev) => [...prev, { sender: 'ai', text: data.data.reply, intent: data.data.intent }]);
+        if (data.data.sessionId) {
+          setChatSessionId(data.data.sessionId);
+          localStorage.setItem(`chat_session_${address}_${connectedAddress}`, data.data.sessionId);
+        }
+      } else {
+        throw new Error(data.message || "Failed to get AI reply");
+      }
+    } catch (err) {
+      console.error("AI chat error:", err);
+      setChatMessages((prev) => [...prev, { sender: 'ai', text: `⚠️ Error: ${err.message}. Please verify your backend server is running and configured with a GEMINI_API_KEY.` }]);
+    } finally {
+      setChatLoading(false);
+      // Scroll to bottom
+      setTimeout(() => {
+        const container = document.getElementById("chat-messages-container");
+        if (container) container.scrollTop = container.scrollHeight;
+      }, 50);
+    }
+  };
+
   if (loading) {
     return (
       <div className="flex items-center justify-center h-96">
@@ -542,7 +741,7 @@ function DAODashboard() {
           DAOs
         </Link>
         <span>→</span>
-        <span className="text-gray-700 font-medium">{daoName}</span>
+        <span className="text-gray-700 dark:text-slate-300 font-medium">{daoName}</span>
       </div>
 
       {/* Header */}
@@ -552,16 +751,22 @@ function DAODashboard() {
             <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center text-white font-bold text-lg shadow-lg">
               {daoName.charAt(0)}
             </div>
-            <h1 className="text-3xl font-extrabold text-gray-900 tracking-tight">
+            <h1 className="text-3xl font-extrabold text-gray-900 dark:text-white tracking-tight">
               {daoName}
             </h1>
           </div>
-          <p className="text-gray-500 font-mono text-xs ml-[52px]">
+          <p className="text-gray-500 dark:text-slate-400 font-mono text-xs ml-[52px]">
             {address}
           </p>
         </div>
         <button
-          onClick={() => setShowCreateModal(true)}
+          onClick={() => {
+            if (!isConnected) {
+              openConnectModal?.();
+            } else {
+              setShowCreateModal(true);
+            }
+          }}
           className="bg-indigo-600 hover:bg-indigo-700 text-white font-semibold py-2.5 px-5 rounded-xl shadow-sm transition-all duration-200"
         >
           + New Proposal
@@ -569,55 +774,61 @@ function DAODashboard() {
       </div>
 
       {errorMessage && (
-        <div className="mb-6 rounded-2xl bg-red-50 border border-red-200 p-4 text-red-700">
+        <div className="mb-6 rounded-2xl bg-red-50 dark:bg-red-950/20 border border-red-200 dark:border-red-900/40 p-4 text-red-700 dark:text-red-400">
           {errorMessage}
         </div>
       )}
 
       {/* Stats Row */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
-        <div className="bg-white rounded-2xl border border-gray-200 p-5">
-          <p className="text-xs text-gray-400 font-medium uppercase tracking-wider mb-1">Total Proposals</p>
-          <p className="text-2xl font-bold text-gray-900">{proposals.length}</p>
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4 mb-8">
+        <div className="bg-white dark:bg-[#151b2c] rounded-2xl border border-gray-200 dark:border-slate-800 p-5 transition-colors duration-300">
+          <p className="text-xs text-gray-400 dark:text-slate-500 font-medium uppercase tracking-wider mb-1">Total Proposals</p>
+          <p className="text-2xl font-bold text-gray-900 dark:text-white">{proposals.length}</p>
         </div>
-        <div className="bg-white rounded-2xl border border-gray-200 p-5">
-          <p className="text-xs text-gray-400 font-medium uppercase tracking-wider mb-1">Active Proposals</p>
-          <p className="text-2xl font-bold text-green-600">
+        <div className="bg-white dark:bg-[#151b2c] rounded-2xl border border-gray-200 dark:border-slate-800 p-5 transition-colors duration-300">
+          <p className="text-xs text-gray-400 dark:text-slate-500 font-medium uppercase tracking-wider mb-1">Active Proposals</p>
+          <p className="text-2xl font-bold text-green-600 dark:text-green-400">
             {proposals.filter((p) => isActive(p.endTime)).length}
           </p>
         </div>
-        <div className="bg-white rounded-2xl border border-gray-200 p-5">
-          <p className="text-xs text-gray-400 font-medium uppercase tracking-wider mb-1">Your Balance</p>
-          <p className="text-2xl font-bold text-indigo-600">{tokenBalance} BLOOM</p>
+        <div className="bg-white dark:bg-[#151b2c] rounded-2xl border border-gray-200 dark:border-slate-800 p-5 transition-colors duration-300">
+          <p className="text-xs text-gray-400 dark:text-slate-500 font-medium uppercase tracking-wider mb-1">Your Balance</p>
+          <p className="text-2xl font-bold text-indigo-600 dark:text-indigo-400">{tokenBalance} BLOOM</p>
         </div>
-        <div className="bg-white rounded-2xl border border-gray-200 p-5">
-          <p className="text-xs text-gray-400 font-medium uppercase tracking-wider mb-1">Voting Power</p>
-          <p className="text-2xl font-bold text-purple-600">{votingPower} Votes</p>
+        <div className="bg-white dark:bg-[#151b2c] rounded-2xl border border-gray-200 dark:border-slate-800 p-5 transition-colors duration-300">
+          <p className="text-xs text-gray-400 dark:text-slate-500 font-medium uppercase tracking-wider mb-1">Voting Power</p>
+          <p className="text-2xl font-bold text-purple-600 dark:text-purple-400">{votingPower} Votes</p>
         </div>
-        <div className="bg-white rounded-2xl border border-gray-200 p-5 relative overflow-hidden">
+        <div className="bg-white dark:bg-[#151b2c] rounded-2xl border border-gray-200 dark:border-slate-800 p-5 relative overflow-hidden transition-colors duration-300">
           <div className="absolute top-0 right-0 p-3">
-            <button onClick={fundTreasury} className="text-xs bg-emerald-100 hover:bg-emerald-200 text-emerald-700 px-2 py-1 rounded font-bold transition-colors">
+            <button onClick={fundTreasury} className="text-xs bg-emerald-100 dark:bg-emerald-950/30 hover:bg-emerald-200 dark:hover:bg-emerald-950/50 text-emerald-700 dark:text-emerald-400 px-2 py-1 rounded font-bold transition-colors">
               + Fund
             </button>
           </div>
-          <p className="text-xs text-gray-400 font-medium uppercase tracking-wider mb-1">Treasury</p>
-          <p className="text-2xl font-bold text-emerald-600">{treasuryBalance} ETH</p>
+          <p className="text-xs text-gray-400 dark:text-slate-500 font-medium uppercase tracking-wider mb-1">Treasury</p>
+          <p className="text-2xl font-bold text-emerald-600 dark:text-emerald-400">{treasuryBalance} ETH</p>
         </div>
       </div>
 
       {/* Proposals */}
       {proposals.length === 0 ? (
-        <div className="bg-white rounded-3xl border border-gray-200 p-12 text-center shadow-sm">
-          <div className="w-16 h-16 bg-gray-100 rounded-2xl flex items-center justify-center mx-auto mb-4 text-2xl">
+        <div className="bg-white dark:bg-[#151b2c] rounded-3xl border border-gray-200 dark:border-slate-800 p-12 text-center shadow-sm transition-colors duration-300">
+          <div className="w-16 h-16 bg-gray-100 dark:bg-slate-800 rounded-2xl flex items-center justify-center mx-auto mb-4 text-2xl">
             📋
           </div>
-          <h3 className="text-lg font-bold text-gray-900 mb-1">No proposals yet</h3>
-          <p className="text-gray-500 mb-6">
+          <h3 className="text-lg font-bold text-gray-900 dark:text-white mb-1">No proposals yet</h3>
+          <p className="text-gray-500 dark:text-slate-400 mb-6">
             Create the first governance proposal for this DAO.
           </p>
           <button
-            onClick={() => setShowCreateModal(true)}
-            className="bg-indigo-50 text-indigo-700 hover:bg-indigo-100 font-semibold py-2 px-6 rounded-lg transition-colors"
+            onClick={() => {
+              if (!isConnected) {
+                openConnectModal?.();
+              } else {
+                setShowCreateModal(true);
+              }
+            }}
+            className="bg-indigo-50 dark:bg-indigo-950/40 text-indigo-700 dark:text-indigo-400 hover:bg-indigo-100 dark:hover:bg-indigo-950/60 font-semibold py-2 px-6 rounded-lg transition-colors"
           >
             Create Proposal
           </button>
@@ -632,43 +843,61 @@ function DAODashboard() {
             return (
               <div
                 key={p.id}
-                className="bg-white rounded-2xl border border-gray-200 overflow-hidden hover:shadow-md transition-shadow"
+                className="bg-white dark:bg-[#151b2c] rounded-2xl border border-gray-200 dark:border-slate-800 overflow-hidden hover:shadow-md transition-all duration-300"
               >
                 {/* Proposal Header */}
-                <div className="p-6 border-b border-gray-100">
+                <div className="p-6 border-b border-gray-100 dark:border-slate-800">
                   <div className="flex items-center justify-between mb-3">
                     <div className="flex items-center space-x-2">
                       {getProposalStatus(p) === 'active' && (
-                        <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-green-50 text-green-700 border border-green-100">
+                        <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-green-50 dark:bg-green-950/30 text-green-700 dark:text-green-400 border border-green-100 dark:border-green-900/40">
                           <span className="w-1.5 h-1.5 rounded-full mr-1.5 bg-green-500"></span>Active
                         </span>
                       )}
                       {getProposalStatus(p) === 'passed' && (
-                        <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-yellow-50 text-yellow-700 border border-yellow-100">
+                        <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-yellow-50 dark:bg-yellow-950/30 text-yellow-700 dark:text-yellow-400 border border-yellow-100 dark:border-yellow-900/40">
                           <span className="w-1.5 h-1.5 rounded-full mr-1.5 bg-yellow-500"></span>Passed
                         </span>
                       )}
                       {getProposalStatus(p) === 'failed' && (
-                        <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-red-50 text-red-700 border border-red-100">
+                        <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-red-50 dark:bg-red-950/30 text-red-700 dark:text-red-400 border border-red-100 dark:border-red-900/40">
                           <span className="w-1.5 h-1.5 rounded-full mr-1.5 bg-red-500"></span>Failed
                         </span>
                       )}
+                      {getProposalStatus(p) === 'quorum_not_met' && (
+                        <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-orange-50 dark:bg-orange-950/30 text-orange-700 dark:text-orange-400 border border-orange-100 dark:border-orange-900/40">
+                          <span className="w-1.5 h-1.5 rounded-full mr-1.5 bg-orange-500"></span>Quorum Not Met
+                        </span>
+                      )}
+                      {getProposalStatus(p) === 'queued' && (
+                        <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-blue-50 dark:bg-blue-950/30 text-blue-700 dark:text-blue-400 border border-blue-100 dark:border-blue-900/40">
+                          <span className="w-1.5 h-1.5 rounded-full mr-1.5 bg-blue-500"></span>Queued
+                        </span>
+                      )}
                       {getProposalStatus(p) === 'executed' && (
-                        <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-emerald-50 text-emerald-700 border border-emerald-100">
+                        <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-emerald-50 dark:bg-emerald-950/30 text-emerald-700 dark:text-emerald-400 border border-emerald-100 dark:border-emerald-900/40">
                           <span className="w-1.5 h-1.5 rounded-full mr-1.5 bg-emerald-500"></span>Executed
                         </span>
                       )}
                       
-                      <span className="text-xs text-gray-400">
+                      <span className="text-xs text-gray-400 dark:text-slate-500">
                         Proposal #{p.id}
                       </span>
                       {p.target && p.target !== "0x0000000000000000000000000000000000000000" && (
-                        <span className="ml-2 px-2 py-0.5 rounded text-xs bg-blue-50 text-blue-600 border border-blue-100">
+                        <span className="ml-2 px-2 py-0.5 rounded text-xs bg-blue-50 dark:bg-blue-950/20 text-blue-600 dark:text-blue-400 border border-blue-100 dark:border-blue-900/30">
                           💰 {p.value} ETH → {p.target.substring(0,6)}...
                         </span>
                       )}
                     </div>
                     <div className="flex space-x-3 items-center">
+                      {getProposalStatus(p) === 'active' && account && p.proposer.toLowerCase() === account.toLowerCase() && (
+                        <button 
+                          onClick={() => cancelProposal(p.id)}
+                          className="bg-red-50 dark:bg-red-950/20 hover:bg-red-100 dark:hover:bg-red-950/40 text-red-600 dark:text-red-400 border border-red-200 dark:border-red-900/40 px-3 py-1 rounded-lg text-sm font-bold shadow-sm transition-colors"
+                        >
+                          🚫 Cancel
+                        </button>
+                      )}
                       {getProposalStatus(p) === 'passed' && (
                         <button 
                           onClick={() => executeProposal(p.id)}
@@ -677,31 +906,40 @@ function DAODashboard() {
                           ⚡ Execute
                         </button>
                       )}
-                      {p.executed && p.target && p.target !== "0x0000000000000000000000000000000000000000" && (
-                        <button 
-                          onClick={() => finalizeProposal(p.id)}
-                          className="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1 rounded-lg text-sm font-bold shadow-sm transition-colors"
-                        >
-                          💸 Finalize
-                        </button>
-                      )}
-                      <span className="text-xs text-gray-400">
+                      {getProposalStatus(p) === 'queued' && (() => {
+                        const remaining = p.executeAfter ? getTimelockTimeRemaining(p.executeAfter) : null;
+                        const disabled = remaining !== null;
+                        return (
+                          <button 
+                            onClick={() => finalizeProposal(p.id)}
+                            disabled={disabled}
+                            className={`px-3 py-1 rounded-lg text-sm font-bold shadow-sm transition-colors ${
+                              disabled
+                                ? "bg-gray-100 dark:bg-slate-800 text-gray-400 dark:text-slate-550 cursor-not-allowed"
+                                : "bg-blue-600 hover:bg-blue-700 text-white"
+                            }`}
+                          >
+                            {disabled ? `⏳ Locked (${remaining})` : "💸 Finalize"}
+                          </button>
+                        );
+                      })()}
+                      <span className="text-xs text-gray-400 dark:text-slate-500">
                         {active ? getTimeRemaining(p.endTime) : "Voting closed"}
                       </span>
                     </div>
                   </div>
-                  <p className="text-gray-900 font-semibold text-base leading-relaxed">
+                  <p className="text-gray-900 dark:text-white font-semibold text-base leading-relaxed">
                     {p.description}
                   </p>
-                  <p className="text-xs text-gray-400 mt-2">
+                  <p className="text-xs text-gray-400 dark:text-slate-500 mt-2">
                     by {p.proposer.substring(0, 6)}...{p.proposer.substring(38)} · {totalVotes.toLocaleString()} total votes
                   </p>
 
                   {/* AI Summary */}
                   <div className="mt-3">
                     {aiSummaries[p.id] ? (
-                      <div className="bg-purple-50 border border-purple-100 rounded-xl px-4 py-3">
-                        <p className="text-xs font-semibold text-purple-600 mb-1 flex items-center justify-between">
+                      <div className="bg-purple-50 dark:bg-purple-950/20 border border-purple-100 dark:border-purple-900/40 rounded-xl px-4 py-3">
+                        <p className="text-xs font-semibold text-purple-600 dark:text-purple-400 mb-1 flex items-center justify-between">
                           <span className="flex items-center"><span className="mr-1">✨</span> AI Summary</span>
                           <button
                             onClick={() => {
@@ -714,7 +952,7 @@ function DAODashboard() {
                             Update Key
                           </button>
                         </p>
-                        <p className="text-sm text-purple-800 leading-relaxed">
+                        <p className="text-sm text-purple-800 dark:text-purple-300 leading-relaxed">
                           {aiSummaries[p.id]}
                         </p>
                       </div>
@@ -722,7 +960,7 @@ function DAODashboard() {
                       <button
                         onClick={() => summarizeProposal(p.id, p.description)}
                         disabled={summarizing[p.id]}
-                        className="text-xs font-semibold text-purple-600 hover:text-purple-700 bg-purple-50 hover:bg-purple-100 border border-purple-100 px-3 py-1.5 rounded-lg transition-all disabled:opacity-50"
+                        className="text-xs font-semibold text-purple-600 dark:text-purple-400 hover:text-purple-700 dark:hover:text-purple-300 bg-purple-50 dark:bg-purple-950/20 hover:bg-purple-100 dark:hover:bg-purple-950/40 border border-purple-100 dark:border-purple-900/30 px-3 py-1.5 rounded-lg transition-all disabled:opacity-50"
                       >
                         {summarizing[p.id] ? (
                           <span className="flex items-center">
@@ -753,8 +991,8 @@ function DAODashboard() {
                           <div
                             className={`flex items-center justify-between px-4 py-3 rounded-xl border transition-all ${
                               isWinning && !active
-                                ? "border-indigo-200 bg-indigo-50/50"
-                                : "border-gray-100 bg-gray-50/50"
+                                ? "border-indigo-200 dark:border-indigo-900/50 bg-indigo-50/50 dark:bg-indigo-950/20"
+                                : "border-gray-100 dark:border-slate-800 bg-gray-50/50 dark:bg-slate-800/20"
                             }`}
                           >
                             <div className="flex items-center space-x-3 z-10 relative">
@@ -767,13 +1005,13 @@ function DAODashboard() {
                                   ✓
                                 </button>
                               )}
-                              <span className="text-sm font-medium text-gray-800">{opt}</span>
+                              <span className="text-sm font-medium text-gray-800 dark:text-slate-200">{opt}</span>
                             </div>
                             <div className="flex items-center space-x-3 z-10 relative">
-                              <span className="text-xs text-gray-500">{votes.toLocaleString()} votes</span>
+                              <span className="text-xs text-gray-500 dark:text-slate-400">{votes.toLocaleString()} votes</span>
                               <span
                                 className={`text-sm font-bold ${
-                                  isWinning && totalVotes > 0 ? "text-indigo-600" : "text-gray-400"
+                                  isWinning && totalVotes > 0 ? "text-indigo-600 dark:text-indigo-400" : "text-gray-400 dark:text-slate-500"
                                 }`}
                               >
                                 {pct}%
@@ -784,7 +1022,7 @@ function DAODashboard() {
                           <div className="absolute bottom-0 left-0 h-1 rounded-b-xl overflow-hidden w-full">
                             <div
                               className={`h-full transition-all duration-700 ${
-                                isWinning ? "bg-indigo-400" : "bg-gray-300"
+                                isWinning ? "bg-indigo-400 dark:bg-indigo-500" : "bg-gray-300 dark:bg-slate-700"
                               }`}
                               style={{ width: `${pct}%` }}
                             ></div>
@@ -799,18 +1037,17 @@ function DAODashboard() {
           })}
         </div>
       )}
-
       {/* ─── Create Proposal Modal ─── */}
       {showCreateModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center">
           <div
-            className="absolute inset-0 bg-black/40 backdrop-blur-sm"
+            className="absolute inset-0 bg-black/50 backdrop-blur-sm"
             onClick={() => !creating && setShowCreateModal(false)}
           ></div>
-          <div className="relative bg-white rounded-3xl border border-gray-200 shadow-2xl w-full max-w-md p-8 mx-4">
+          <div className="relative bg-white dark:bg-[#151b2c] rounded-3xl border border-gray-200 dark:border-slate-800 shadow-2xl w-full max-w-md p-8 mx-4 max-h-[90vh] overflow-y-auto transition-colors duration-300">
             <button
               onClick={() => !creating && setShowCreateModal(false)}
-              className="absolute top-4 right-4 text-gray-400 hover:text-gray-600 transition-colors"
+              className="absolute top-4 right-4 text-gray-400 hover:text-gray-600 dark:hover:text-slate-300 transition-colors"
             >
               <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
@@ -821,16 +1058,16 @@ function DAODashboard() {
               <span className="text-white text-xl">📋</span>
             </div>
 
-            <h2 className="text-xl font-bold text-gray-900 text-center mb-1">
+            <h2 className="text-xl font-bold text-gray-900 dark:text-white text-center mb-1">
               New Proposal
             </h2>
-            <p className="text-sm text-gray-500 text-center mb-6">
+            <p className="text-sm text-gray-500 dark:text-slate-400 text-center mb-6">
               Submit a governance proposal for the community to vote on.
             </p>
 
             <div className="space-y-4">
-              <div className="flex items-center justify-between bg-gray-50 p-3 rounded-xl border border-gray-100 mb-2">
-                <span className="text-sm font-medium text-gray-700">Financial Proposal?</span>
+              <div className="flex items-center justify-between bg-gray-50 dark:bg-slate-800/40 p-3 rounded-xl border border-gray-100 dark:border-slate-800 mb-2">
+                <span className="text-sm font-medium text-gray-700 dark:text-slate-200">Financial Proposal?</span>
                 <label className="relative inline-flex items-center cursor-pointer">
                   <input type="checkbox" checked={isFinancial} onChange={() => setIsFinancial(!isFinancial)} className="sr-only peer" />
                   <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-indigo-600"></div>
@@ -840,18 +1077,18 @@ function DAODashboard() {
               {isFinancial && (
                 <div className="grid grid-cols-2 gap-4">
                   <div>
-                    <label className="block text-xs font-semibold text-gray-600 mb-1.5">Target Address</label>
-                    <input type="text" value={targetAddress} onChange={e => setTargetAddress(e.target.value)} placeholder="0x..." className="w-full border border-gray-200 rounded-xl px-4 py-2.5 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+                    <label className="block text-xs font-semibold text-gray-600 dark:text-slate-400 mb-1.5">Target Address</label>
+                    <input type="text" value={targetAddress} onChange={e => setTargetAddress(e.target.value)} placeholder="0x..." className="w-full border border-gray-200 dark:border-slate-800 rounded-xl px-4 py-2.5 text-sm text-gray-900 dark:text-white bg-white dark:bg-[#0b0f19] focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent" />
                   </div>
                   <div>
-                    <label className="block text-xs font-semibold text-gray-600 mb-1.5">ETH Amount</label>
-                    <input type="number" step="0.01" value={ethAmount} onChange={e => setEthAmount(e.target.value)} placeholder="0.5" className="w-full border border-gray-200 rounded-xl px-4 py-2.5 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+                    <label className="block text-xs font-semibold text-gray-600 dark:text-slate-400 mb-1.5">ETH Amount</label>
+                    <input type="number" step="0.01" value={ethAmount} onChange={e => setEthAmount(e.target.value)} placeholder="0.5" className="w-full border border-gray-200 dark:border-slate-800 rounded-xl px-4 py-2.5 text-sm text-gray-900 dark:text-white bg-white dark:bg-[#0b0f19] focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent" />
                   </div>
                 </div>
               )}
 
               <div>
-                <label className="block text-xs font-semibold text-gray-600 mb-1.5">
+                <label className="block text-xs font-semibold text-gray-600 dark:text-slate-400 mb-1.5">
                   Description
                 </label>
                 <textarea
@@ -859,12 +1096,12 @@ function DAODashboard() {
                   onChange={(e) => setProposalDesc(e.target.value)}
                   placeholder="e.g. Should we allocate 10 ETH to the marketing fund?"
                   rows={3}
-                  className="w-full border border-gray-200 rounded-xl px-4 py-2.5 text-sm text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent resize-none"
+                  className="w-full border border-gray-200 dark:border-slate-800 rounded-xl px-4 py-2.5 text-sm text-gray-900 dark:text-white bg-white dark:bg-[#0b0f19] placeholder-gray-400 dark:placeholder-slate-650 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent resize-none"
                 />
               </div>
 
               <div>
-                <label className="block text-xs font-semibold text-gray-600 mb-1.5">
+                <label className="block text-xs font-semibold text-gray-600 dark:text-slate-400 mb-1.5">
                   Duration (minutes)
                 </label>
                 <input
@@ -872,12 +1109,12 @@ function DAODashboard() {
                   value={proposalDuration}
                   onChange={(e) => setProposalDuration(e.target.value)}
                   min="1"
-                  className="w-full border border-gray-200 rounded-xl px-4 py-2.5 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                  className="w-full border border-gray-200 dark:border-slate-800 rounded-xl px-4 py-2.5 text-sm text-gray-900 dark:text-white bg-white dark:bg-[#0b0f19] focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
                 />
               </div>
 
               <div>
-                <label className="block text-xs font-semibold text-gray-600 mb-1.5">
+                <label className="block text-xs font-semibold text-gray-600 dark:text-slate-400 mb-1.5">
                   Voting Options
                 </label>
                 <div className="space-y-2">
@@ -892,7 +1129,7 @@ function DAODashboard() {
                           setProposalOptions(copy);
                         }}
                         placeholder={`Option ${idx + 1}`}
-                        className="flex-1 border border-gray-200 rounded-xl px-4 py-2.5 text-sm text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                        className="flex-1 border border-gray-200 dark:border-slate-800 rounded-xl px-4 py-2.5 text-sm text-gray-900 dark:text-white bg-white dark:bg-[#0b0f19] placeholder-gray-400 dark:placeholder-slate-650 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
                       />
                       {proposalOptions.length > 2 && (
                         <button
@@ -911,7 +1148,7 @@ function DAODashboard() {
                 </div>
                 <button
                   onClick={() => setProposalOptions([...proposalOptions, ""])}
-                  className="text-xs text-indigo-600 hover:text-indigo-700 font-semibold mt-2 transition-colors"
+                  className="text-xs text-indigo-600 dark:text-indigo-400 hover:text-indigo-700 dark:hover:text-indigo-300 font-semibold mt-2 transition-colors"
                 >
                   + Add Option
                 </button>
@@ -922,14 +1159,14 @@ function DAODashboard() {
                 disabled={creating}
                 className={`w-full py-3 px-4 rounded-xl text-sm font-semibold transition-all duration-200 mt-2 ${
                   creating
-                    ? "bg-gray-100 text-gray-400 cursor-not-allowed"
+                    ? "bg-gray-100 dark:bg-slate-800 text-gray-400 dark:text-slate-650 cursor-not-allowed"
                     : "bg-indigo-600 hover:bg-indigo-700 text-white shadow-sm hover:shadow-md"
                 }`}
               >
                 {creating ? (
                   <span className="flex items-center justify-center">
                     <svg className="animate-spin -ml-1 mr-2 h-4 w-4 text-gray-400" fill="none" viewBox="0 0 24 24">
-                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth={4}></circle>
                       <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
                     </svg>
                     Submitting...
@@ -946,13 +1183,13 @@ function DAODashboard() {
       {showKeyModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center">
           <div
-            className="absolute inset-0 bg-black/40 backdrop-blur-sm"
+            className="absolute inset-0 bg-black/50 backdrop-blur-sm"
             onClick={() => setShowKeyModal(false)}
           ></div>
-          <div className="relative bg-white rounded-3xl border border-gray-200 shadow-2xl w-full max-w-md p-8 mx-4">
+          <div className="relative bg-white dark:bg-[#151b2c] rounded-3xl border border-gray-200 dark:border-slate-800 shadow-2xl w-full max-w-md p-8 mx-4 max-h-[90vh] overflow-y-auto transition-colors duration-300">
             <button
               onClick={() => setShowKeyModal(false)}
-              className="absolute top-4 right-4 text-gray-400 hover:text-gray-600 transition-colors"
+              className="absolute top-4 right-4 text-gray-400 hover:text-gray-600 dark:hover:text-slate-300 transition-colors"
             >
               <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
@@ -965,16 +1202,16 @@ function DAODashboard() {
               </svg>
             </div>
 
-            <h2 className="text-xl font-bold text-gray-900 text-center mb-1">
+            <h2 className="text-xl font-bold text-gray-900 dark:text-white text-center mb-1">
               Configure Gemini API Key
             </h2>
-            <p className="text-sm text-gray-500 text-center mb-6">
+            <p className="text-sm text-gray-500 dark:text-slate-400 text-center mb-6">
               AI summaries require a valid Google Gemini API Key.
             </p>
 
             <div className="space-y-4">
               <div>
-                <label className="block text-xs font-semibold text-gray-600 mb-1.5">
+                <label className="block text-xs font-semibold text-gray-600 dark:text-slate-400 mb-1.5">
                   Gemini API Key
                 </label>
                 <input
@@ -982,15 +1219,15 @@ function DAODashboard() {
                   value={tempKey}
                   onChange={(e) => setTempKey(e.target.value)}
                   placeholder="Paste your AIzaSy... API Key"
-                  className="w-full border border-gray-200 rounded-xl px-4 py-2.5 text-sm text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                  className="w-full border border-gray-200 dark:border-slate-800 rounded-xl px-4 py-2.5 text-sm text-gray-900 dark:text-white bg-white dark:bg-[#0b0f19] placeholder-gray-400 dark:placeholder-slate-650 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent"
                 />
-                <p className="text-xs text-gray-400 mt-2">
+                <p className="text-xs text-gray-400 dark:text-slate-500 mt-2">
                   Don't have a key? Get one for free at{" "}
                   <a
                     href="https://aistudio.google.com/"
                     target="_blank"
                     rel="noreferrer"
-                    className="text-purple-600 hover:text-purple-700 font-semibold underline"
+                    className="text-purple-600 dark:text-purple-400 hover:text-purple-700 dark:hover:text-purple-300 font-semibold underline"
                   >
                     Google AI Studio
                   </a>.
@@ -1006,7 +1243,7 @@ function DAODashboard() {
                 </button>
                 <button
                   onClick={handleSkipWithMock}
-                  className="flex-1 py-3 px-4 rounded-xl text-sm font-semibold bg-gray-100 hover:bg-gray-200 text-gray-700 transition-all duration-200"
+                  className="flex-1 py-3 px-4 rounded-xl text-sm font-semibold bg-gray-100 dark:bg-slate-850 hover:bg-gray-200 dark:hover:bg-slate-750 text-gray-700 dark:text-slate-200 transition-all duration-200"
                 >
                   Skip & Mock
                 </button>
@@ -1015,6 +1252,134 @@ function DAODashboard() {
           </div>
         </div>
       )}
+      
+      {/* ─── AI Copilot Floating Toggle ─── */}
+      <button
+        onClick={() => setShowChat(!showChat)}
+        className="fixed bottom-6 right-6 bg-gradient-to-r from-indigo-600 via-indigo-700 to-purple-600 hover:from-indigo-700 hover:to-purple-700 text-white p-4 rounded-full shadow-[0_8px_30px_rgb(79,70,229,0.4)] transition-all duration-300 hover:scale-110 z-50 flex items-center justify-center border border-indigo-400 group"
+        id="ai-assistant-toggle"
+      >
+        {showChat ? (
+          <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+          </svg>
+        ) : (
+          <svg className="w-6 h-6 group-hover:rotate-12 transition-transform duration-300" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z" />
+          </svg>
+        )}
+      </button>
+
+      {/* ─── AI Copilot Floating Chat Widget ─── */}
+      <div
+        className={`fixed bottom-24 right-6 w-96 h-[calc(100vh-140px)] max-h-[460px] bg-white/95 dark:bg-[#151b2c]/95 backdrop-blur-xl border border-gray-200 dark:border-slate-800 shadow-[0_20px_50px_rgba(0,0,0,0.15)] dark:shadow-[0_20px_50px_rgba(0,0,0,0.5)] z-50 rounded-2xl flex flex-col transition-all duration-300 origin-bottom-right transform ${
+          showChat ? "scale-100 opacity-100 translate-y-0" : "scale-75 opacity-0 translate-y-8 pointer-events-none"
+        }`}
+        id="ai-copilot-sidebar"
+      >
+        {/* Header */}
+        <div className="p-4 rounded-t-2xl flex items-center justify-between bg-gradient-to-r from-indigo-600 via-indigo-700 to-purple-600 text-white shadow-md">
+          <div className="flex items-center space-x-3">
+            <div className="relative bg-white/20 p-2 rounded-xl border border-white/10">
+              <span className="text-xl block leading-none">🤖</span>
+              <span className="absolute bottom-0 right-0 w-2.5 h-2.5 rounded-full bg-green-400 border-2 border-indigo-600 animate-pulse"></span>
+            </div>
+            <div>
+              <h3 className="font-bold text-sm leading-tight text-white">BlockBloom AI Copilot</h3>
+              <p className="text-[10px] text-indigo-100 font-medium">Grounded in DAO context • online</p>
+            </div>
+          </div>
+          <div className="flex items-center space-x-2">
+            <button
+              onClick={() => {
+                if (window.confirm("Clear conversation history?")) {
+                  setChatMessages([]);
+                  sessionStorage.removeItem(`chat_history_${address}`);
+                  localStorage.removeItem(`chat_session_${address}_${connectedAddress}`);
+                  setChatSessionId("");
+                }
+              }}
+              className="text-[10px] bg-white/10 hover:bg-white/20 text-white px-2 py-1 rounded-md transition-colors font-semibold"
+              title="Clear History"
+            >
+              Clear
+            </button>
+            <button
+              onClick={() => setShowChat(false)}
+              className="text-white/80 hover:text-white p-1 rounded-md hover:bg-white/10 transition-colors"
+            >
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+              </svg>
+            </button>
+          </div>
+        </div>
+
+        {/* Message History */}
+        <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-gray-50/50 dark:bg-[#0b0f19]/60" id="chat-messages-container">
+          {chatMessages.length === 0 ? (
+            <div className="h-full flex flex-col items-center justify-center text-center p-6 text-gray-400 dark:text-slate-500">
+              <span className="text-3xl mb-2">👋</span>
+              <p className="font-semibold text-gray-700 dark:text-slate-300 text-sm">Ask me anything about this DAO!</p>
+              <p className="text-xs mt-1 max-w-[220px]">Get live answers about treasury balances, active proposals, or voting stats.</p>
+            </div>
+          ) : (
+            chatMessages.map((msg, idx) => (
+              <div
+                key={idx}
+                className={`flex ${msg.sender === 'user' ? 'justify-end' : 'justify-start'}`}
+              >
+                <div
+                  className={`max-w-[85%] rounded-2xl p-3.5 text-xs shadow-sm ${
+                    msg.sender === 'user'
+                      ? 'bg-indigo-600 text-white rounded-tr-none'
+                      : 'bg-white dark:bg-[#1b2336] text-gray-800 dark:text-slate-200 rounded-tl-none border border-gray-200/60 dark:border-slate-800'
+                  }`}
+                >
+                  <p className="leading-relaxed whitespace-pre-wrap font-medium">{msg.text}</p>
+                  {msg.intent && msg.intent.intent !== 'chitchat' && (
+                    <span className="block mt-2 text-[9px] text-gray-400 dark:text-slate-500 font-mono">
+                      🔍 Intent: {msg.intent.intent.replace(/_/g, ' ')} ({Math.round(msg.intent.confidence * 100)}% match)
+                    </span>
+                  )}
+                </div>
+              </div>
+            ))
+          )}
+          {chatLoading && (
+            <div className="flex justify-start">
+              <div className="bg-white dark:bg-[#1b2336] border border-gray-200/60 dark:border-slate-800 rounded-2xl rounded-tl-none p-4 shadow-sm flex items-center space-x-1.5">
+                <div className="w-1.5 h-1.5 bg-indigo-500 rounded-full animate-bounce" style={{ animationDelay: '0ms' }}></div>
+                <div className="w-1.5 h-1.5 bg-indigo-500 rounded-full animate-bounce" style={{ animationDelay: '150ms' }}></div>
+                <div className="w-1.5 h-1.5 bg-indigo-500 rounded-full animate-bounce" style={{ animationDelay: '300ms' }}></div>
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Chat Input */}
+        <form onSubmit={handleSendChatMessage} className="p-3.5 border-t border-gray-200/80 dark:border-slate-800 bg-white dark:bg-[#151b2c] rounded-b-2xl">
+          <div className="flex items-center space-x-2 bg-gray-50 dark:bg-[#0b0f19]/80 border border-gray-200/80 dark:border-slate-800 rounded-xl px-3 py-1.5 focus-within:ring-1 focus-within:ring-indigo-500 focus-within:border-indigo-500 transition-all duration-300">
+            <input
+              type="text"
+              value={chatInput}
+              onChange={(e) => setChatInput(e.target.value)}
+              placeholder="Ask a question..."
+              disabled={chatLoading}
+              className="flex-1 text-xs bg-transparent text-gray-800 dark:text-slate-200 placeholder-gray-400 dark:placeholder-slate-500 focus:outline-none disabled:text-gray-400 dark:disabled:text-slate-600"
+            />
+            <button
+              type="submit"
+              disabled={chatLoading || !chatInput.trim()}
+              className="bg-indigo-600 hover:bg-indigo-700 disabled:bg-gray-200 dark:disabled:bg-slate-700 text-white disabled:text-gray-400 dark:disabled:text-slate-500 p-2 rounded-full transition-all duration-300 flex items-center justify-center hover:scale-105"
+            >
+              <svg className="w-3.5 h-3.5 transform rotate-45 -translate-y-[1px] translate-x-[1px]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
+              </svg>
+            </button>
+          </div>
+        </form>
+      </div>
     </div>
   );
 }

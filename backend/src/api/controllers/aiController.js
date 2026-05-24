@@ -106,7 +106,7 @@ async function handleCopilotChat(req, res, next) {
     await memoryManager.addMessage(activeSessionId, 'user', message);
 
     // Generate AI response
-    const result = await chat({ message, daoAddress, chatHistory, sessionId: activeSessionId });
+    const result = await chat({ message, daoAddress, userAddress, chatHistory, sessionId: activeSessionId });
 
     // Save assistant response
     await memoryManager.addMessage(activeSessionId, 'assistant', result.reply, {

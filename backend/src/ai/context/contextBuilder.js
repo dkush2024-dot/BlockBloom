@@ -29,6 +29,14 @@ const { getProvider } = require('../../blockchain/provider');
 const { Proposal, DAO, Vote } = require('../../models');
 const { formatProposalForPrompt, formatTreasuryForPrompt } = require('../prompts/governance');
 const logger = require('../../config/logger');
+const { ethers } = require('ethers');
+
+// Minimal ERC-20 ABI — only what we need for balance queries
+const ERC20_ABI = [
+  'function balanceOf(address account) view returns (uint256)',
+  'function symbol() view returns (string)',
+  'function decimals() view returns (uint8)',
+];
 
 /**
  * Fetch proposal context from both MongoDB (fast) and optionally blockchain (authoritative).
@@ -131,32 +139,34 @@ async function getDAOContext(daoAddress) {
   const context = { dao: null, activeProposals: [], treasury: null };
 
   try {
-    // DAO info from MongoDB
-    const dao = await DAO.findOne({ governanceAddress: daoAddress });
+    // DAO info from MongoDB — field is contractAddress (not governanceAddress)
+    const dao = await DAO.findOne({ contractAddress: daoAddress.toLowerCase() });
     if (dao) {
       context.dao = {
         name: dao.name,
-        governanceAddress: dao.governanceAddress,
+        governanceAddress: dao.contractAddress,
         treasuryAddress: dao.treasuryAddress,
         tokenAddress: dao.tokenAddress,
+        proposalThreshold: dao.proposalThreshold,
+        quorumPercentage: dao.quorumPercentage,
+        timelockDelay: dao.timelockDelay,
         createdAt: dao.createdAt,
       };
 
-      // Active proposals
+      // All proposals (active, pending, closed, etc.)
       const proposals = await Proposal.find({
-        daoAddress,
-        status: { $in: ['Active', 'Pending'] },
+        daoAddress: daoAddress.toLowerCase(),
       }).sort({ createdAt: -1 }).limit(10);
 
       context.activeProposals = proposals.map(p => ({
         proposalId: p.proposalId,
-        title: p.title,
+        description: p.description,
         status: p.status,
-        votesFor: p.votesFor,
-        votesAgainst: p.votesAgainst,
+        options: p.options,
+        endTime: p.endTime,
       }));
 
-      // Treasury
+      // Treasury — fetch live ETH balance via provider
       if (dao.treasuryAddress) {
         context.treasury = await getTreasuryContext(dao.treasuryAddress);
       }
@@ -169,16 +179,49 @@ async function getDAOContext(daoAddress) {
 }
 
 /**
+ * Fetch the user's personal BLOOM token balance from the token contract.
+ *
+ * @param {string} userAddress - The connected wallet address
+ * @param {string} tokenAddress - The BLOOM ERC-20 token contract address
+ * @returns {Promise<Object>} - { bloomBalance, symbol }
+ */
+async function getUserWalletContext(userAddress, tokenAddress) {
+  const context = { bloomBalance: null, symbol: 'BLOOM', ethBalance: null };
+  try {
+    const provider = getProvider();
+    if (!provider || !userAddress || !tokenAddress) return context;
+
+    // ETH balance of user wallet
+    const ethWei = await provider.getBalance(userAddress);
+    context.ethBalance = ethers.formatEther(ethWei);
+
+    // BLOOM token balance via ERC-20 balanceOf
+    const tokenContract = new ethers.Contract(tokenAddress, ERC20_ABI, provider);
+    const rawBalance = await tokenContract.balanceOf(userAddress);
+    let decimals = 18;
+    try { decimals = await tokenContract.decimals(); } catch { /* default 18 */ }
+    try { context.symbol = await tokenContract.symbol(); } catch { /* default BLOOM */ }
+    context.bloomBalance = ethers.formatUnits(rawBalance, decimals);
+
+    logger.debug(`[ContextBuilder] User ${userAddress} BLOOM balance: ${context.bloomBalance}`);
+  } catch (error) {
+    logger.warn('[ContextBuilder] User wallet context failed:', error.message);
+  }
+  return context;
+}
+
+/**
  * Build a complete context string for AI prompts.
  * Combines all available data into a formatted string.
  *
  * @param {Object} options
  * @param {string} options.daoAddress - DAO address
+ * @param {string} options.userAddress - Connected wallet address (optional)
  * @param {string} options.proposalId - Specific proposal ID
  * @param {boolean} options.includeTreasury - Include treasury data
  * @returns {Promise<string>} - Formatted context string for prompt injection
  */
-async function buildFullContext({ daoAddress, proposalId, includeTreasury = true }) {
+async function buildFullContext({ daoAddress, userAddress, proposalId, includeTreasury = true }) {
   const parts = [];
 
   // DAO overview
@@ -186,11 +229,33 @@ async function buildFullContext({ daoAddress, proposalId, includeTreasury = true
     const daoCtx = await getDAOContext(daoAddress);
     if (daoCtx.dao) {
       parts.push(`--- DAO: ${daoCtx.dao.name} ---`);
-      parts.push(`Address: ${daoCtx.dao.governanceAddress}`);
-      parts.push(`Active Proposals: ${daoCtx.activeProposals.length}`);
+      parts.push(`Governance Address: ${daoCtx.dao.governanceAddress}`);
+      parts.push(`Proposal Threshold: ${daoCtx.dao.proposalThreshold} BLOOM tokens`);
+      parts.push(`Quorum Required: ${daoCtx.dao.quorumPercentage}%`);
+      parts.push(`Timelock Delay: ${daoCtx.dao.timelockDelay} seconds`);
+      parts.push(`Total Proposals: ${daoCtx.activeProposals.length}`);
+      if (daoCtx.activeProposals.length > 0) {
+        parts.push(`Proposals:\n` + daoCtx.activeProposals.map(p =>
+          `  - #${p.proposalId} [${p.status}]: ${p.description || 'No description'}`
+        ).join('\n'));
+      }
+    } else {
+      parts.push(`DAO at ${daoAddress} has not been indexed yet or does not exist.`);
     }
     if (includeTreasury && daoCtx.treasury) {
       parts.push(formatTreasuryForPrompt(daoCtx.treasury));
+    }
+
+    // User wallet balance — personal BLOOM holdings
+    if (userAddress && daoCtx.dao?.tokenAddress) {
+      const walletCtx = await getUserWalletContext(userAddress, daoCtx.dao.tokenAddress);
+      if (walletCtx.bloomBalance !== null) {
+        parts.push(
+          `--- Your Wallet (${userAddress}) ---\n` +
+          `ETH Balance: ${parseFloat(walletCtx.ethBalance).toFixed(4)} ETH\n` +
+          `${walletCtx.symbol} Token Balance: ${parseFloat(walletCtx.bloomBalance).toLocaleString()} ${walletCtx.symbol}`
+        );
+      }
     }
   }
 
@@ -211,5 +276,6 @@ module.exports = {
   getProposalContext,
   getTreasuryContext,
   getDAOContext,
+  getUserWalletContext,
   buildFullContext,
 };
