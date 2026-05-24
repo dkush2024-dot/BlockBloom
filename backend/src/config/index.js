@@ -35,6 +35,10 @@ const config = {
 
   // --- Auth ---
   jwtSecret: process.env.JWT_SECRET || 'super-secret-default-key-please-change',
+
+  // --- AI (Gemini) ---
+  geminiApiKey: process.env.GEMINI_API_KEY || '',
+  geminiModel: process.env.GEMINI_MODEL || 'gemini-1.5-flash',
 };
 
 /**
