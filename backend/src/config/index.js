@@ -20,6 +20,7 @@ const config = {
 
   // --- MongoDB ---
   mongoUri: process.env.MONGODB_URI || 'mongodb://localhost:27017/blockbloom',
+  useInMemoryDb: process.env.USE_IN_MEMORY_DB !== 'false',
 
   // --- Blockchain ---
   rpcUrl: process.env.RPC_URL,

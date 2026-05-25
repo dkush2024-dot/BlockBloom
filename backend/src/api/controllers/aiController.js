@@ -32,6 +32,9 @@ async function handleExplain(req, res, next) {
     const explanation = await explainProposal(proposal);
     res.json({ success: true, data: explanation });
   } catch (error) {
+    if (error.message.includes('GEMINI_API_KEY not configured')) {
+      return res.json({ success: true, data: "✨ AI explanation is currently in setup mode. Please add a GEMINI_API_KEY to the backend/.env file." });
+    }
     logger.error('[AIController] Explain failed:', error.message);
     next(error);
   }
@@ -47,6 +50,9 @@ async function handleSummarize(req, res, next) {
     const summary = await summarizeProposal(proposal);
     res.json({ success: true, data: summary });
   } catch (error) {
+    if (error.message.includes('GEMINI_API_KEY not configured')) {
+      return res.json({ success: true, data: "✨ AI summarization is currently in setup mode. Please add a GEMINI_API_KEY to the backend/.env file." });
+    }
     logger.error('[AIController] Summarize failed:', error.message);
     next(error);
   }
@@ -123,6 +129,16 @@ async function handleCopilotChat(req, res, next) {
       },
     });
   } catch (error) {
+    if (error.message.includes('GEMINI_API_KEY not configured')) {
+      return res.json({
+        success: true,
+        data: {
+          reply: "👋 Hi! The AI Copilot is currently in setup mode. Please add your GEMINI_API_KEY to the backend/.env file to activate AI responses.",
+          sessionId: sessionId || 'setup-mode',
+          intent: { intent: 'setup', confidence: 1.0 },
+        },
+      });
+    }
     logger.error('[AIController] Copilot chat failed:', error.message);
     next(error);
   }
@@ -167,6 +183,20 @@ async function handleCopilotStream(req, res, next) {
     res.write(`data: [DONE]\n\n`);
     res.end();
   } catch (error) {
+    if (error.message.includes('GEMINI_API_KEY not configured')) {
+      const msg = "👋 Hi! The AI Copilot is currently in setup mode. Please add your GEMINI_API_KEY to the backend/.env file to activate AI responses.";
+      if (!res.headersSent) {
+        res.writeHead(200, {
+          'Content-Type': 'text/event-stream',
+          'Cache-Control': 'no-cache',
+          'Connection': 'keep-alive',
+        });
+        res.write(`data: ${JSON.stringify({ sessionId: sessionId || 'setup-mode' })}\n\n`);
+      }
+      res.write(`data: ${JSON.stringify({ text: msg })}\n\n`);
+      res.write(`data: [DONE]\n\n`);
+      return res.end();
+    }
     logger.error('[AIController] Copilot stream failed:', error.message);
     if (!res.headersSent) next(error);
     else { res.write(`data: ${JSON.stringify({ error: error.message })}\n\n`); res.end(); }
