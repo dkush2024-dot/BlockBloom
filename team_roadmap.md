@@ -9,18 +9,18 @@ To scale this into a production-grade DAO platform, here is the structured roadm
 
 **Primary Goal:** Build a robust, scalable backend to index blockchain data, cache proposals, and serve real-time updates to the frontend.
 
-### Phase 1: Foundation & Setup
-- **Framework Setup:** Initialize a Node.js/Express backend (or NestJS/FastAPI depending on your preference).
-- **Database Architecture:** Set up MongoDB or PostgreSQL. Design schemas for User Profiles (linked to wallet addresses), Off-chain Proposal drafts, and Community/DAO metadata.
-- **API Development:** Create basic REST endpoints for the frontend to fetch non-critical metadata that doesn't need to be stored on the blockchain (to save gas).
+### Phase 1: Foundation & Setup [✅ COMPLETED]
+- [x] **Framework Setup:** Initialize a Node.js/Express backend.
+- [x] **Database Architecture:** Set up MongoDB. Design schemas for User Profiles, Proposals, and DAO metadata.
+- [x] **API Development:** Create basic REST endpoints.
 
-### Phase 2: Indexing & Caching
-- **Blockchain Syncing:** Use tools like Alchemy, Infura, or Ethers.js to listen to Smart Contract events (e.g., `VoteCast`, `ProposalCreated`) and sync them to your database.
-- **Redis Caching:** Implement Redis to cache high-traffic queries like active proposals and live leaderboard stats so the frontend loads instantly.
+### Phase 2: Indexing & APIs [✅ COMPLETED]
+- [x] **Blockchain Syncing:** Listen to Smart Contract events (`DAOCreated`, `VoteCast`, `ProposalCreated`) and sync to MongoDB.
+- [x] **Advanced APIs:** Built `GET /api/votes/leaderboard`, `POST /api/proposals/close-expired`, `GET /api/votes/voter/:address`, and `GET /api/daos/stats`.
 
 ### Phase 3: Real-time Systems
-- **WebSockets (Socket.IO):** Integrate WebSockets so when a vote is cast on the blockchain, the backend instantly pushes the update to Nikhil's frontend without requiring a page refresh.
-- **Security:** Implement wallet-based authentication (e.g., SIWE - Sign In With Ethereum) for off-chain actions like drafting proposals or editing user profiles.
+- [x] **WebSockets (Socket.IO):** Integrate WebSockets to instantly push blockchain updates to the frontend.
+- [ ] **Security:** Implement wallet-based authentication (e.g., SIWE - Sign In With Ethereum) for off-chain actions like drafting proposals.
 
 ---
 
