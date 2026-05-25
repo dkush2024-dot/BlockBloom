@@ -22,13 +22,8 @@ async function connectDatabase() {
   try {
     let uri = config.mongoUri;
 
-<<<<<<< Updated upstream
-    // Automatically spin up an in-memory MongoDB server in development mode if not explicitly disabled
-    if (config.nodeEnv === 'development' && process.env.USE_IN_MEMORY_DB !== 'false') {
-=======
     // Automatically spin up an in-memory MongoDB server in development mode, unless explicitly bypassed
     if (config.nodeEnv === 'development' && config.useInMemoryDb) {
->>>>>>> Stashed changes
       try {
         const { MongoMemoryServer } = require('mongodb-memory-server');
         logger.info('Starting MongoMemoryServer for development...');
