@@ -7,10 +7,13 @@ import { getEthersProvider, getEthersSigner } from "../utils/adapters";
 import { useAccount } from "wagmi";
 import { useConnectModal } from "@rainbow-me/rainbowkit";
 
+import { useToast } from "../context/ToastContext";
+
 const API_BASE = import.meta.env.VITE_API_BASE || "http://localhost:5000/api";
 const EXPECTED_CHAIN_ID = import.meta.env.VITE_REQUIRED_CHAIN_ID || "31337";
 
 function Home() {
+  const { showToast } = useToast();
   const { isConnected } = useAccount();
   const { openConnectModal } = useConnectModal();
   const [daos, setDaos] = useState([]);
@@ -128,7 +131,7 @@ function Home() {
       return;
     }
     if (!daoName.trim()) {
-      alert("Please enter a DAO name.");
+      showToast("Please enter a DAO name.", "warning");
       return;
     }
 
@@ -157,7 +160,7 @@ function Home() {
       );
       await tx.wait();
 
-      alert(`"${daoName}" DAO deployed successfully! 🎉`);
+      showToast(`"${daoName}" DAO deployed successfully! 🎉`, "success");
       setShowModal(false);
       setDaoName("");
       setThreshold("1");
@@ -169,7 +172,7 @@ function Home() {
       const message = err?.message || "Failed to deploy DAO. Check console for details.";
       setErrorMessage(message);
       console.error("Deploy failed:", err);
-      alert(message);
+      showToast(message, "error");
     } finally {
       setDeploying(false);
     }

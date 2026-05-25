@@ -33,7 +33,11 @@ const logger = require('../../config/logger');
 async function generateText(prompt, opts = {}) {
   const model = getModel(opts);
   if (!model) {
-    throw new Error('AI service unavailable: GEMINI_API_KEY not configured');
+    logger.warn('[GeminiService] GEMINI_API_KEY is not configured. Returning fallback setup instructions.');
+    return {
+      text: "🤖 AI Assistant: Please configure your `GEMINI_API_KEY` in `backend/.env` to enable the fully grounded AI Copilot conversation. You can generate a free key at https://aistudio.google.com/apikey",
+      tokenCount: 0,
+    };
   }
 
   try {
@@ -83,7 +87,21 @@ async function generateText(prompt, opts = {}) {
 async function generateJSON(prompt, requiredFields = [], opts = {}) {
   const model = getJsonModel(opts);
   if (!model) {
-    throw new Error('AI service unavailable: GEMINI_API_KEY not configured');
+    logger.warn('[GeminiService] GEMINI_API_KEY is not configured for JSON. Returning fallback mock JSON structure.');
+    const mockData = {};
+    for (const field of requiredFields) {
+      if (field === 'summary') {
+        mockData[field] = 'Please configure your GEMINI_API_KEY in backend/.env to enable AI summaries.';
+      } else if (field === 'status') {
+        mockData[field] = 'key_missing';
+      } else {
+        mockData[field] = 'AI service unavailable: GEMINI_API_KEY not configured. Please set it to enable advanced governance analytics.';
+      }
+    }
+    return {
+      data: mockData,
+      tokenCount: 0,
+    };
   }
 
   try {
@@ -143,7 +161,9 @@ async function generateJSON(prompt, requiredFields = [], opts = {}) {
 async function* streamText(prompt, opts = {}) {
   const model = getStreamingModel(opts);
   if (!model) {
-    throw new Error('AI service unavailable: GEMINI_API_KEY not configured');
+    logger.warn('[GeminiService] GEMINI_API_KEY is not configured for Streaming. Yielding fallback message.');
+    yield "🤖 AI Assistant: Please configure your `GEMINI_API_KEY` in `backend/.env` to enable the fully grounded AI Copilot conversation. You can generate a free key at https://aistudio.google.com/apikey";
+    return;
   }
 
   try {

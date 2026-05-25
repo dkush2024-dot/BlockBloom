@@ -7,10 +7,13 @@ import { useConnectModal } from "@rainbow-me/rainbowkit";
 import contracts from "../contracts.json";
 import { getEthersProvider, getEthersSigner } from "../utils/adapters";
 
+import { useToast } from "../context/ToastContext";
+
 const API_BASE = import.meta.env.VITE_API_BASE || "http://localhost:5000/api";
 const EXPECTED_CHAIN_ID = import.meta.env.VITE_REQUIRED_CHAIN_ID || "31337";
 
 function DAODashboard() {
+  const { showToast } = useToast();
   const { address } = useParams();
   const { address: connectedAddress, isConnected } = useAccount();
   const { openConnectModal } = useConnectModal();
@@ -41,12 +44,7 @@ function DAODashboard() {
   // AI Summary state
   const [aiSummaries, setAiSummaries] = useState({});
   const [summarizing, setSummarizing] = useState({});
-  const [geminiApiKey, setGeminiApiKey] = useState(
-    localStorage.getItem("GEMINI_API_KEY") || import.meta.env.VITE_GEMINI_API_KEY || ""
-  );
-  const [showKeyModal, setShowKeyModal] = useState(false);
-  const [tempKey, setTempKey] = useState("");
-  const [pendingSummaryArgs, setPendingSummaryArgs] = useState(null);
+  // (We no longer need client-side Gemini keys as summaries are fetched securely via the backend server)
 
   // AI Chatbot States
   const [showChat, setShowChat] = useState(false);
@@ -314,11 +312,11 @@ function DAODashboard() {
       return;
     }
     if (!proposalDesc.trim()) {
-      alert("Please enter a proposal description.");
+      showToast("Please enter a proposal description.", "warning");
       return;
     }
     if (proposalOptions.filter((o) => o.trim()).length < 2) {
-      alert("At least 2 voting options are required.");
+      showToast("At least 2 voting options are required.", "warning");
       return;
     }
     setErrorMessage("");
@@ -375,7 +373,7 @@ function DAODashboard() {
       }
       await tx.wait();
 
-      alert("Proposal created successfully! 🎉");
+      showToast("Proposal created successfully! 🎉", "success");
       setShowCreateModal(false);
       setProposalDesc("");
       setProposalDuration("5");
@@ -388,7 +386,7 @@ function DAODashboard() {
         "Failed to create proposal. You may not have enough $BLOOM tokens.";
       setErrorMessage(message);
       console.error("Create proposal failed:", err);
-      alert(message);
+      showToast(message, "error");
     } finally {
       setCreating(false);
     }
@@ -432,10 +430,10 @@ function DAODashboard() {
       const tx = await gov.executeProposal(proposalId);
       await tx.wait();
       
-      alert('✅ Proposal executed successfully!');
+      showToast("Proposal executed successfully! ✅", "success");
       await connectAndLoad();
     } catch (err) {
-      alert(`Failed to execute: ${err?.reason || err?.message}`);
+      showToast(`Failed to execute: ${err?.reason || err?.message}`, "error");
     }
   };
 
@@ -453,10 +451,10 @@ function DAODashboard() {
       const tx = await gov.finalizeProposal(proposalId);
       await tx.wait();
       
-      alert('💸 Financial proposal finalized!');
+      showToast("Financial proposal finalized! 💸", "success");
       await connectAndLoad();
     } catch (err) {
-      alert(`Failed to finalize: ${err?.reason || err?.message}`);
+      showToast(`Failed to finalize: ${err?.reason || err?.message}`, "error");
     }
   };
 
@@ -475,10 +473,10 @@ function DAODashboard() {
       const tx = await gov.cancelProposal(proposalId);
       await tx.wait();
       
-      alert('Proposal cancelled successfully!');
+      showToast("Proposal cancelled successfully! 🚫", "success");
       await connectAndLoad();
     } catch (err) {
-      alert(`Failed to cancel: ${err?.reason || err?.message}`);
+      showToast(`Failed to cancel: ${err?.reason || err?.message}`, "error");
     }
   };
 
@@ -498,10 +496,10 @@ function DAODashboard() {
         value: parseEther(amt)
       });
       await tx.wait();
-      alert("✅ Treasury funded successfully!");
+      showToast("Treasury funded successfully! ✅", "success");
       await connectAndLoad();
     } catch (err) {
-      alert(`Funding failed: ${err.message}`);
+      showToast(`Funding failed: ${err.message}`, "error");
     }
   };
 
@@ -519,13 +517,13 @@ function DAODashboard() {
       const gov = new Contract(address, contracts.Governance.abi, signer);
       const tx = await gov.vote(BigInt(proposalId), BigInt(optionIndex));
       await tx.wait();
-      alert("Vote cast successfully! ✅");
+      showToast("Vote cast successfully! ✅", "success");
       await loadDAO(provider);
     } catch (err) {
       const message = err?.message || "Vote failed. You may have already voted or lack voting power.";
       setErrorMessage(message);
       console.error("Vote failed:", err);
-      alert(message);
+      showToast(message, "error");
     } finally {
       setVotingOn(null);
     }
@@ -601,83 +599,36 @@ function DAODashboard() {
   const summarizeProposal = async (proposalId, description) => {
     if (aiSummaries[proposalId] && aiSummaries[proposalId] !== "Could not generate summary.") return;
     
-    const activeKey = geminiApiKey || localStorage.getItem("GEMINI_API_KEY");
-    
-    // If no key is provided, prompt for Gemini API key
-    if (!activeKey) {
-      setPendingSummaryArgs({ proposalId, description });
-      setTempKey("");
-      setShowKeyModal(true);
-      return;
-    }
-
     setSummarizing((prev) => ({ ...prev, [proposalId]: true }));
     try {
-      const res = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${activeKey}`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            contents: [
-              {
-                parts: [
-                  {
-                    text: `You are a DAO governance assistant. Summarize this proposal in exactly 2 clear sentences. Be neutral and factual.\n\nProposal: "${description}"`,
-                  },
-                ],
-              },
-            ],
-          }),
-        }
-      );
+      const res = await fetch(`${API_BASE}/ai/summarize`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          proposal: {
+            proposalId: proposalId.toString(),
+            description,
+          },
+        }),
+      });
 
-      if (res.status === 400 || res.status === 403) {
-        throw new Error("Invalid API key");
+      if (!res.ok) {
+        throw new Error("Failed to fetch summary from server");
       }
 
-      const data = await res.json();
-      const summary =
-        data?.candidates?.[0]?.content?.parts?.[0]?.text ||
-        generateMockSummary(description);
+      const result = await res.json();
+      if (!result.success || !result.data) {
+        throw new Error(result.message || "Invalid response format from server");
+      }
+
+      const summary = result.data.summary || generateMockSummary(description);
       setAiSummaries((prev) => ({ ...prev, [proposalId]: summary }));
     } catch (err) {
       console.warn("AI summary failed, falling back to local summarizer:", err);
-      // Fail gracefully to the smart mock summarizer
       const mockSummary = generateMockSummary(description);
       setAiSummaries((prev) => ({ ...prev, [proposalId]: mockSummary }));
     } finally {
       setSummarizing((prev) => ({ ...prev, [proposalId]: false }));
-    }
-  };
-
-  const handleSaveApiKey = () => {
-    const trimmed = tempKey.trim();
-    localStorage.setItem("GEMINI_API_KEY", trimmed);
-    setGeminiApiKey(trimmed);
-    setShowKeyModal(false);
-    if (pendingSummaryArgs) {
-      // Retry summarizing
-      const { proposalId, description } = pendingSummaryArgs;
-      setPendingSummaryArgs(null);
-      // Wait a tick for state update
-      setTimeout(() => {
-        summarizeProposal(proposalId, description);
-      }, 100);
-    }
-  };
-
-  const handleSkipWithMock = () => {
-    setShowKeyModal(false);
-    if (pendingSummaryArgs) {
-      const { proposalId, description } = pendingSummaryArgs;
-      setPendingSummaryArgs(null);
-      setSummarizing((prev) => ({ ...prev, [proposalId]: true }));
-      setTimeout(() => {
-        const mockSummary = generateMockSummary(description);
-        setAiSummaries((prev) => ({ ...prev, [proposalId]: mockSummary }));
-        setSummarizing((prev) => ({ ...prev, [proposalId]: false }));
-      }, 300);
     }
   };
 
@@ -941,16 +892,6 @@ function DAODashboard() {
                       <div className="bg-purple-50 dark:bg-purple-950/20 border border-purple-100 dark:border-purple-900/40 rounded-xl px-4 py-3">
                         <p className="text-xs font-semibold text-purple-600 dark:text-purple-400 mb-1 flex items-center justify-between">
                           <span className="flex items-center"><span className="mr-1">✨</span> AI Summary</span>
-                          <button
-                            onClick={() => {
-                              setPendingSummaryArgs({ proposalId: p.id, description: p.description });
-                              setTempKey(geminiApiKey);
-                              setShowKeyModal(true);
-                            }}
-                            className="text-[10px] text-purple-400 hover:text-purple-600 font-medium transition-colors"
-                          >
-                            Update Key
-                          </button>
                         </p>
                         <p className="text-sm text-purple-800 dark:text-purple-300 leading-relaxed">
                           {aiSummaries[p.id]}
@@ -1179,79 +1120,7 @@ function DAODashboard() {
           </div>
         </div>
       )}
-      {/* ─── Gemini API Key Modal ─── */}
-      {showKeyModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center">
-          <div
-            className="absolute inset-0 bg-black/50 backdrop-blur-sm"
-            onClick={() => setShowKeyModal(false)}
-          ></div>
-          <div className="relative bg-white dark:bg-[#151b2c] rounded-3xl border border-gray-200 dark:border-slate-800 shadow-2xl w-full max-w-md p-8 mx-4 max-h-[90vh] overflow-y-auto transition-colors duration-300">
-            <button
-              onClick={() => setShowKeyModal(false)}
-              className="absolute top-4 right-4 text-gray-400 hover:text-gray-600 dark:hover:text-slate-300 transition-colors"
-            >
-              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-              </svg>
-            </button>
-
-            <div className="w-12 h-12 bg-gradient-to-br from-purple-500 to-indigo-600 rounded-xl flex items-center justify-center mx-auto mb-5 shadow-lg">
-              <svg className="w-6 h-6 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M15 7a2 2 0 012 2m-5 8a2 2 0 01-2-2V9a2 2 0 114 0v4a2 2 0 01-2 2z" />
-              </svg>
-            </div>
-
-            <h2 className="text-xl font-bold text-gray-900 dark:text-white text-center mb-1">
-              Configure Gemini API Key
-            </h2>
-            <p className="text-sm text-gray-500 dark:text-slate-400 text-center mb-6">
-              AI summaries require a valid Google Gemini API Key.
-            </p>
-
-            <div className="space-y-4">
-              <div>
-                <label className="block text-xs font-semibold text-gray-600 dark:text-slate-400 mb-1.5">
-                  Gemini API Key
-                </label>
-                <input
-                  type="password"
-                  value={tempKey}
-                  onChange={(e) => setTempKey(e.target.value)}
-                  placeholder="Paste your AIzaSy... API Key"
-                  className="w-full border border-gray-200 dark:border-slate-800 rounded-xl px-4 py-2.5 text-sm text-gray-900 dark:text-white bg-white dark:bg-[#0b0f19] placeholder-gray-400 dark:placeholder-slate-650 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent"
-                />
-                <p className="text-xs text-gray-400 dark:text-slate-500 mt-2">
-                  Don't have a key? Get one for free at{" "}
-                  <a
-                    href="https://aistudio.google.com/"
-                    target="_blank"
-                    rel="noreferrer"
-                    className="text-purple-600 dark:text-purple-400 hover:text-purple-700 dark:hover:text-purple-300 font-semibold underline"
-                  >
-                    Google AI Studio
-                  </a>.
-                </p>
-              </div>
-
-              <div className="flex space-x-3 mt-2">
-                <button
-                  onClick={handleSaveApiKey}
-                  className="flex-1 py-3 px-4 rounded-xl text-sm font-semibold bg-purple-600 hover:bg-purple-700 text-white shadow-sm hover:shadow-md transition-all duration-200"
-                >
-                  💾 Save API Key
-                </button>
-                <button
-                  onClick={handleSkipWithMock}
-                  className="flex-1 py-3 px-4 rounded-xl text-sm font-semibold bg-gray-100 dark:bg-slate-850 hover:bg-gray-200 dark:hover:bg-slate-750 text-gray-700 dark:text-slate-200 transition-all duration-200"
-                >
-                  Skip & Mock
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
+      
       
       {/* ─── AI Copilot Floating Toggle ─── */}
       <button
