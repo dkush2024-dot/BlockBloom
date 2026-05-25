@@ -1,6 +1,6 @@
 {
   "DAOFactory": {
-    "address": "0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512",
+    "address": "0x12c7Db0D3C7dC5a331b841a430C05B2F98a65cAc",
     "abi": [
       {
         "anonymous": false,
@@ -556,7 +556,7 @@
     ]
   },
   "BloomToken": {
-    "address": "0x5FbDB2315678afecb367f032d93F642f64180aa3",
+    "address": "0xe7b1710d4066FDc481119fB1Ba7cc2BA4d58B1EB",
     "abi": [
       {
         "inputs": [
