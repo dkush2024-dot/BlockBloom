@@ -10,13 +10,17 @@ import { QueryClientProvider, QueryClient } from '@tanstack/react-query';
 import { config } from './wagmi.js';
 import { ThemeProvider, useTheme } from './utils/ThemeContext';
 
+import { ToastProvider } from './context/ToastContext';
+
 const queryClient = new QueryClient();
 
 function RainbowKitWrapper() {
   const { isDark } = useTheme();
   return (
     <RainbowKitProvider theme={isDark ? darkTheme() : lightTheme()}>
-      <App />
+      <ToastProvider>
+        <App />
+      </ToastProvider>
     </RainbowKitProvider>
   );
 }
