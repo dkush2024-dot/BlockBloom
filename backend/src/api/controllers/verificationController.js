@@ -1,0 +1,136 @@
+const { MerkleTree } = require('merkletreejs');
+const keccak256 = require('keccak256');
+const csv = require('csv-parser');
+const fs = require('fs');
+const { ethers } = require('ethers');
+const { StudentVerification, Election } = require('../../models');
+const { getElectionContractWithSigner } = require('../../blockchain/contracts');
+const { ApiError } = require('../../utils');
+
+class VerificationController {
+  // POST /api/verifications/:electionAddress/upload
+  async uploadCSV(req, res, next) {
+    try {
+      if (!req.file) {
+        throw ApiError.badRequest('No CSV file uploaded');
+      }
+
+      const electionAddress = req.params.electionAddress.toLowerCase();
+      const election = await Election.findOne({ contractAddress: electionAddress });
+      if (!election) {
+        throw ApiError.notFound('Election not found');
+      }
+
+      // Check organization scope (superadmins bypass this)
+      if (req.user.role !== 'superadmin' && String(election.orgId) !== String(req.user.orgId)) {
+        throw ApiError.forbidden('You do not have permission to manage this election.');
+      }
+
+      // Check for mid-election whitelist tampering
+      if (election.proposalCount > 0) {
+        throw ApiError.badRequest('Cannot update whitelist: Election already has proposals.');
+      }
+
+      const addresses = [];
+
+      try {
+        // Parse CSV
+        await new Promise((resolve, reject) => {
+          fs.createReadStream(req.file.path)
+            .pipe(csv())
+            .on('data', (row) => {
+              // Assume column name is 'walletAddress' or 'address'
+              let addr = row.walletAddress || row.address || Object.values(row)[0];
+              if (addr && ethers.isAddress(addr)) {
+                 addresses.push(addr.trim().toLowerCase());
+              }
+            })
+            .on('end', resolve)
+            .on('error', reject);
+        });
+      } finally {
+        // Always remove temp file
+        if (fs.existsSync(req.file.path)) {
+          fs.unlinkSync(req.file.path);
+        }
+      }
+
+      if (addresses.length === 0) {
+        throw ApiError.badRequest('No valid Ethereum addresses found in CSV');
+      }
+
+      // Generate Merkle Tree
+      const leaves = addresses.map(addr => keccak256(ethers.AbiCoder.defaultAbiCoder().encode(['address'], [addr])));
+      const tree = new MerkleTree(leaves, keccak256, { sortPairs: true });
+      const root = tree.getHexRoot();
+
+      // Call setMerkleRoot on the smart contract
+      const contract = getElectionContractWithSigner(electionAddress);
+      if (!contract) {
+        throw ApiError.internal('Could not instantiate contract with admin signer. Check ADMIN_PRIVATE_KEY.');
+      }
+
+      try {
+        const tx = await contract.setMerkleRoot(root);
+        await tx.wait(); // Wait for confirmation
+      } catch (blockchainErr) {
+        throw ApiError.internal(`Blockchain transaction failed: ${blockchainErr.message}`);
+      }
+
+      // Update election doc
+      election.merkleRoot = root;
+      await election.save();
+
+      // Store proofs in DB
+      await StudentVerification.deleteMany({ election: election._id }); // Clear old
+      
+      // Batch inserts to prevent OOM
+      const batchSize = 1000;
+      for (let i = 0; i < addresses.length; i += batchSize) {
+        const batchAddresses = addresses.slice(i, i + batchSize);
+        const verifications = batchAddresses.map(addr => {
+          const leaf = keccak256(ethers.AbiCoder.defaultAbiCoder().encode(['address'], [addr]));
+          const proof = tree.getHexProof(leaf);
+          return {
+            election: election._id,
+            walletAddress: addr,
+            proof
+          };
+        });
+        await StudentVerification.insertMany(verifications);
+      }
+
+      res.json({ success: true, message: 'Students verified and Merkle Root set on-chain', root, count: addresses.length });
+    } catch (error) {
+      // Clean up file if error happened before try-finally
+      if (req.file && fs.existsSync(req.file.path)) {
+        fs.unlinkSync(req.file.path);
+      }
+      next(error);
+    }
+  }
+
+  // GET /api/verifications/:electionAddress/proof
+  async getProof(req, res, next) {
+    try {
+      const electionAddress = req.params.electionAddress.toLowerCase();
+      const election = await Election.findOne({ contractAddress: electionAddress });
+      if (!election) throw ApiError.notFound('Election not found');
+
+      const verification = await StudentVerification.findOne({
+        election: election._id,
+        walletAddress: req.user.address.toLowerCase()
+      });
+
+      if (!verification) {
+        return res.json({ success: true, isWhitelisted: false, proof: [] });
+      }
+
+      res.json({ success: true, isWhitelisted: true, proof: verification.proof });
+    } catch (error) {
+      next(error);
+    }
+  }
+}
+
+module.exports = new VerificationController();

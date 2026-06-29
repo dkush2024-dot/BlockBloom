@@ -19,7 +19,9 @@ const requireAuth = (req, res, next) => {
     
     // Attach user info to request object
     req.user = {
+      userId: decoded.userId,
       address: decoded.address,
+      role: decoded.role,
       chainId: decoded.chainId
     };
 

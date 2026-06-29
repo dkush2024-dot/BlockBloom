@@ -2,78 +2,67 @@
  * Blockchain Event Indexer
  *
  * THE BRAIN OF THE BACKEND — this is where blockchain meets database.
- *
- * CRASH RECOVERY:
- *   The SyncState model stores the last processed block per contract.
- *   On restart, the indexer fetches historical events from that block onward
- *   before switching to live listening — no missed events.
  */
 
 const { ethers } = require('ethers');
 const {
-  getDAOFactoryContract,
-  getGovernanceContract,
+  getElectionFactoryContract,
+  getElectionContract,
   getTreasuryContract,
-  GovernanceABI,
-} = require('../blockchain');
+} = require('../blockchain/contracts');
 const { getProvider } = require('../blockchain/provider');
-const { DAO, Proposal, Vote, SyncState } = require('../models');
+const { Election, Proposal, Vote, SyncState } = require('../models');
 const { emitGlobal, emitToDAO } = require('../websocket/socketManager');
 const logger = require('../config/logger');
 
-// Keeps track of which DAO and Treasury addresses we're currently listening to
-const activeListeners = new Map();
-
 /**
- * Handles a DAOCreated event — saves DAO to database, emits to clients,
- * and starts listening to the new DAO's Governance and Treasury events.
+ * Handles an ElectionCreated event
  */
-async function handleDAOCreated(daoAddress, treasuryAddress, name, tokenAddress, proposalThreshold, timelockDelay, quorumPercentage, creator, event) {
+async function handleElectionCreated(orgId, electionAddress, treasuryAddress, name, timelockDelay, quorumVotes, creator, event) {
   try {
     const txReceipt = event.log || event;
 
-    const daoData = {
-      contractAddress: daoAddress.toLowerCase(),
+    const electionData = {
+      orgId,
+      contractAddress: electionAddress.toLowerCase(),
       treasuryAddress: treasuryAddress.toLowerCase(),
       name,
-      tokenAddress: tokenAddress.toLowerCase(),
-      proposalThreshold: proposalThreshold.toString(),
       timelockDelay: Number(timelockDelay),
-      quorumPercentage: Number(quorumPercentage),
+      quorumVotes: Number(quorumVotes),
       creator: creator.toLowerCase(),
       blockNumber: txReceipt.blockNumber,
       transactionHash: txReceipt.transactionHash,
     };
 
-    const exists = await DAO.findOne({ contractAddress: daoData.contractAddress });
+    const exists = await Election.findOne({ contractAddress: electionData.contractAddress });
 
-    const dao = await DAO.findOneAndUpdate(
-      { contractAddress: daoData.contractAddress },
-      daoData,
+    const election = await Election.findOneAndUpdate(
+      { contractAddress: electionData.contractAddress },
+      electionData,
       { upsert: true, new: true, setDefaultsOnInsert: true }
     );
 
-    logger.info(`📦 DAO indexed: "${name}" at ${daoAddress} with Treasury ${treasuryAddress}`);
+    logger.info(`📦 Election indexed: "${name}" at ${electionAddress}`);
 
     if (!exists) {
-      emitGlobal('dao:created', dao.toObject());
+      emitGlobal('election:created', election.toObject());
     }
   } catch (error) {
-    logger.error('Error handling DAOCreated event:', error);
+    logger.error('Error handling ElectionCreated event:', error);
   }
 }
 
 /**
- * Handles a ProposalCreated event from a specific Governance contract.
+ * Handles a ProposalCreated event from an Election contract.
  */
-async function handleProposalCreated(daoAddress, id, proposer, description, snapshotBlock, endTime, target, value, event) {
+async function handleProposalCreated(electionAddress, id, proposer, description, endTime, target, value, event) {
   try {
     const txReceipt = event.log || event;
 
-    const governanceContract = getGovernanceContract(daoAddress);
+    const electionContract = getElectionContract(electionAddress);
     let optionNames = [];
     try {
-      const proposalData = await governanceContract.getProposal(id);
+      const proposalData = await electionContract.getProposal(id);
       optionNames = proposalData.optionNames || [];
     } catch (err) {
       logger.warn(`Could not fetch proposal options from chain for proposal ${id}:`, err.message);
@@ -87,15 +76,14 @@ async function handleProposalCreated(daoAddress, id, proposer, description, snap
 
     const proposalData = {
       proposalId: id.toString(),
-      daoAddress: daoAddress.toLowerCase(),
+      daoAddress: electionAddress.toLowerCase(), // Keeping daoAddress field for compatibility or update to electionAddress
       proposer: proposer.toLowerCase(),
       description,
-      snapshotBlock: snapshotBlock.toString(),
       endTime: new Date(Number(endTime) * 1000),
       options,
       status: 'active',
-      target: target.toLowerCase(),
-      value: value.toString(),
+      target: (target || '0x0000000000000000000000000000000000000000').toLowerCase(),
+      value: (value || 0).toString(),
       blockNumber: txReceipt.blockNumber,
       transactionHash: txReceipt.transactionHash,
     };
@@ -112,16 +100,16 @@ async function handleProposalCreated(daoAddress, id, proposer, description, snap
     );
 
     if (!exists) {
-      await DAO.findOneAndUpdate(
-        { contractAddress: daoAddress.toLowerCase() },
+      await Election.findOneAndUpdate(
+        { contractAddress: electionAddress.toLowerCase() },
         { $inc: { proposalCount: 1 } }
       );
     }
 
-    logger.info(`📝 Proposal indexed: #${id} in DAO ${daoAddress}`);
+    logger.info(`📝 Proposal indexed: #${id} in Election ${electionAddress}`);
 
     if (!exists) {
-      emitToDAO(daoAddress, 'proposal:created', proposal.toObject());
+      emitToDAO(electionAddress, 'proposal:created', proposal.toObject());
       emitGlobal('proposal:created', proposal.toObject());
     }
   } catch (error) {
@@ -130,18 +118,18 @@ async function handleProposalCreated(daoAddress, id, proposer, description, snap
 }
 
 /**
- * Handles a VoteCast event from a specific Governance contract.
+ * Handles a VoteCast event from a specific Election contract.
  */
-async function handleVoteCast(daoAddress, proposalId, voter, optionIndex, weight, event) {
+async function handleVoteCast(electionAddress, proposalId, voter, optionIndex, event) {
   try {
     const txReceipt = event.log || event;
 
     const voteData = {
-      daoAddress: daoAddress.toLowerCase(),
+      daoAddress: electionAddress.toLowerCase(),
       proposalId: proposalId.toString(),
       voter: voter.toLowerCase(),
       optionIndex: Number(optionIndex),
-      weight: weight.toString(),
+      weight: "1", // 1 student = 1 vote
       blockNumber: txReceipt.blockNumber,
       transactionHash: txReceipt.transactionHash,
     };
@@ -170,8 +158,8 @@ async function handleVoteCast(daoAddress, proposalId, voter, optionIndex, weight
     }
 
     try {
-      const governanceContract = getGovernanceContract(daoAddress);
-      const proposalData = await governanceContract.getProposal(proposalId);
+      const electionContract = getElectionContract(electionAddress);
+      const proposalData = await electionContract.getProposal(proposalId);
       const updatedOptions = (proposalData.optionNames || []).map((name, i) => ({
         name,
         voteCount: (proposalData.optionVotes[i] || 0n).toString(),
@@ -186,8 +174,8 @@ async function handleVoteCast(daoAddress, proposalId, voter, optionIndex, weight
     }
 
     if (!exists) {
-      await DAO.findOneAndUpdate(
-        { contractAddress: daoAddress.toLowerCase() },
+      await Election.findOneAndUpdate(
+        { contractAddress: electionAddress.toLowerCase() },
         { $inc: { totalVotes: 1 } }
       );
     }
@@ -195,61 +183,50 @@ async function handleVoteCast(daoAddress, proposalId, voter, optionIndex, weight
     logger.info(`🗳️  Vote indexed: voter ${voter} on proposal #${proposalId}`);
 
     if (!exists) {
-      emitToDAO(daoAddress, 'vote:cast', vote.toObject());
+      emitToDAO(electionAddress, 'vote:cast', vote.toObject());
       emitGlobal('vote:cast', vote.toObject());
       
       const redis = require('../config/redis');
-      await redis.del('leaderboard');
+      if (redis.isOpen) await redis.del('leaderboard');
     }
   } catch (error) {
     logger.error('Error handling VoteCast event:', error);
   }
 }
 
-/**
- * Handles ProposalQueued event (Financial proposal passed and queued in Treasury)
- */
-async function handleProposalQueued(daoAddress, proposalId, timelockTxId) {
+async function handleProposalQueued(electionAddress, proposalId, timelockTxId) {
   try {
     const proposal = await Proposal.findOneAndUpdate(
-      { daoAddress: daoAddress.toLowerCase(), proposalId: proposalId.toString() },
+      { daoAddress: electionAddress.toLowerCase(), proposalId: proposalId.toString() },
       { status: 'queued', timelockTxId: timelockTxId },
       { new: true }
     );
     if (proposal) {
       logger.info(`⏳ Proposal #${proposalId} queued in timelock with txId ${timelockTxId}`);
-      emitToDAO(daoAddress, 'proposal:updated', proposal.toObject());
+      emitToDAO(electionAddress, 'proposal:updated', proposal.toObject());
     }
   } catch (error) {
     logger.error('Error handling ProposalQueued event:', error);
   }
 }
 
-/**
- * Handles ProposalExecuted event (Standard proposal executed, or financial proposal marked executed and queued)
- */
-async function handleProposalExecuted(daoAddress, proposalId) {
+async function handleProposalExecuted(electionAddress, proposalId) {
   try {
-    // If it's a financial proposal, it might have been marked 'queued' by handleProposalQueued already.
-    // If it's a standard proposal, it becomes 'executed'.
-    const proposal = await Proposal.findOne({ daoAddress: daoAddress.toLowerCase(), proposalId: proposalId.toString() });
+    const proposal = await Proposal.findOne({ daoAddress: electionAddress.toLowerCase(), proposalId: proposalId.toString() });
     
     if (proposal && proposal.status !== 'queued') {
         proposal.status = 'executed';
         await proposal.save();
         logger.info(`✅ Proposal #${proposalId} executed`);
-        emitToDAO(daoAddress, 'proposal:updated', proposal.toObject());
-        emitToDAO(daoAddress, 'proposal:executed', { proposalId });
+        emitToDAO(electionAddress, 'proposal:updated', proposal.toObject());
+        emitToDAO(electionAddress, 'proposal:executed', { proposalId });
     }
   } catch (error) {
     logger.error('Error handling ProposalExecuted event:', error);
   }
 }
 
-/**
- * Handles ProposalCancelled event
- */
-async function handleProposalCancelled(daoAddress, proposalId, event) {
+async function handleProposalCancelled(electionAddress, proposalId, event) {
   try {
     const txReceipt = event.log || event;
     const provider = getProvider();
@@ -257,33 +234,30 @@ async function handleProposalCancelled(daoAddress, proposalId, event) {
     const cancelTime = new Date((block.timestamp - 1) * 1000);
 
     const proposal = await Proposal.findOneAndUpdate(
-      { daoAddress: daoAddress.toLowerCase(), proposalId: proposalId.toString() },
+      { daoAddress: electionAddress.toLowerCase(), proposalId: proposalId.toString() },
       { status: 'closed', endTime: cancelTime },
       { new: true }
     );
     if (proposal) {
       logger.info(`🚫 Proposal #${proposalId} cancelled (endTime set to ${cancelTime})`);
-      emitToDAO(daoAddress, 'proposal:updated', proposal.toObject());
-      emitToDAO(daoAddress, 'proposal:cancelled', { proposalId });
+      emitToDAO(electionAddress, 'proposal:updated', proposal.toObject());
+      emitToDAO(electionAddress, 'proposal:cancelled', { proposalId });
     }
   } catch (error) {
     logger.error('Error handling ProposalCancelled event:', error);
   }
 }
 
-/**
- * Handles TransactionExecuted from Treasury (Financial proposal finalized)
- */
-async function handleTransactionExecuted(treasuryAddress, daoAddress, txId) {
+async function handleTransactionExecuted(treasuryAddress, electionAddress, txId) {
   try {
     const proposal = await Proposal.findOneAndUpdate(
-      { daoAddress: daoAddress.toLowerCase(), timelockTxId: txId },
+      { daoAddress: electionAddress.toLowerCase(), timelockTxId: txId },
       { status: 'finalized' },
       { new: true }
     );
     if (proposal) {
       logger.info(`💸 Financial Proposal #${proposal.proposalId} finalized and funds transferred`);
-      emitToDAO(daoAddress, 'proposal:updated', proposal.toObject());
+      emitToDAO(electionAddress, 'proposal:updated', proposal.toObject());
     }
   } catch (error) {
     logger.error('Error handling TransactionExecuted event:', error);
@@ -293,10 +267,6 @@ async function handleTransactionExecuted(treasuryAddress, daoAddress, txId) {
 let indexerInterval = null;
 let isPolling = false;
 
-/**
- * Polls the blockchain for new events.
- * Uses queryFilter which is extremely stable and survives Hardhat restarts.
- */
 async function pollBlockchain() {
   if (isPolling) return;
   isPolling = true;
@@ -306,12 +276,11 @@ async function pollBlockchain() {
     if (!provider) return;
 
     const currentBlock = await provider.getBlockNumber();
-    const daoFactory = getDAOFactoryContract();
+    const electionFactory = getElectionFactoryContract();
 
     // 1. Sync Factory
-    if (daoFactory) {
-      const factorySync = await SyncState.findOne({ contractId: 'DAOFactory' });
-      // On brand new node / reset, start recent to avoid Alchemy's 50k block range limit
+    if (electionFactory) {
+      const factorySync = await SyncState.findOne({ contractId: 'ElectionFactory' });
       let startBlock = factorySync ? factorySync.lastSyncedBlock + 1 : Math.max(0, currentBlock - 49000);
       if (factorySync && factorySync.lastSyncedBlock > currentBlock) {
         startBlock = Math.max(0, currentBlock - 49000);
@@ -321,29 +290,29 @@ async function pollBlockchain() {
       }
 
       if (startBlock <= currentBlock) {
-        const events = await daoFactory.queryFilter('DAOCreated', startBlock, currentBlock);
+        const events = await electionFactory.queryFilter('ElectionCreated', startBlock, currentBlock);
         for (const event of events) {
-          const [daoAddress, treasuryAddress, name, tokenAddress, proposalThreshold, timelockDelay, quorumPercentage, creator] = event.args;
-          await handleDAOCreated(daoAddress, treasuryAddress, name, tokenAddress, proposalThreshold, timelockDelay, quorumPercentage, creator, event);
+          const [orgId, electionAddress, treasuryAddress, name, timelockDelay, quorumVotes, creator] = event.args;
+          await handleElectionCreated(orgId, electionAddress, treasuryAddress, name, timelockDelay, quorumVotes, creator, event);
         }
         await SyncState.findOneAndUpdate(
-          { contractId: 'DAOFactory' },
+          { contractId: 'ElectionFactory' },
           { lastSyncedBlock: currentBlock },
           { upsert: true }
         );
       }
     }
 
-    // 2. Sync existing DAOs
-    const existingDAOs = await DAO.find({}).lean();
-    for (const dao of existingDAOs) {
-      const daoAddress = dao.contractAddress;
-      const syncKey = `DAO:${daoAddress}`;
-      const daoSync = await SyncState.findOne({ contractId: syncKey });
+    // 2. Sync existing Elections
+    const existingElections = await Election.find({}).lean();
+    for (const election of existingElections) {
+      const electionAddress = election.contractAddress;
+      const syncKey = `Election:${electionAddress}`;
+      const electionSync = await SyncState.findOne({ contractId: syncKey });
       
-      let startBlock = daoSync ? daoSync.lastSyncedBlock + 1 : dao.blockNumber || Math.max(0, currentBlock - 49000);
-      if (daoSync && daoSync.lastSyncedBlock > currentBlock) {
-        startBlock = dao.blockNumber || Math.max(0, currentBlock - 49000);
+      let startBlock = electionSync ? electionSync.lastSyncedBlock + 1 : election.blockNumber || Math.max(0, currentBlock - 49000);
+      if (electionSync && electionSync.lastSyncedBlock > currentBlock) {
+        startBlock = election.blockNumber || Math.max(0, currentBlock - 49000);
       }
       if (currentBlock - startBlock > 49000) {
          startBlock = currentBlock - 49000;
@@ -351,52 +320,52 @@ async function pollBlockchain() {
 
       if (startBlock <= currentBlock) {
         try {
-          const govContract = getGovernanceContract(daoAddress);
-          if (!govContract) continue;
+          const electionContract = getElectionContract(electionAddress);
+          if (!electionContract) continue;
 
           // ProposalCreated
-          const pEvents = await govContract.queryFilter('ProposalCreated', startBlock, currentBlock);
+          const pEvents = await electionContract.queryFilter('ProposalCreated', startBlock, currentBlock);
           for (const ev of pEvents) {
-            const [id, proposer, description, snapshotBlock, endTime, target, value] = ev.args;
-            await handleProposalCreated(daoAddress, id, proposer, description, snapshotBlock, endTime, target, value, ev);
+            const [id, proposer, description, endTime, target, value] = ev.args;
+            await handleProposalCreated(electionAddress, id, proposer, description, endTime, target, value, ev);
           }
 
           // VoteCast
-          const vEvents = await govContract.queryFilter('VoteCast', startBlock, currentBlock);
+          const vEvents = await electionContract.queryFilter('VoteCast', startBlock, currentBlock);
           for (const ev of vEvents) {
-            const [proposalId, voter, optionIndex, weight] = ev.args;
-            await handleVoteCast(daoAddress, proposalId, voter, optionIndex, weight, ev);
+            const [proposalId, voter, optionIndex] = ev.args;
+            await handleVoteCast(electionAddress, proposalId, voter, optionIndex, ev);
           }
 
           // ProposalQueued
-          const qEvents = await govContract.queryFilter('ProposalQueued', startBlock, currentBlock);
+          const qEvents = await electionContract.queryFilter('ProposalQueued', startBlock, currentBlock);
           for (const ev of qEvents) {
             const [proposalId, timelockTxId] = ev.args;
-            await handleProposalQueued(daoAddress, proposalId, timelockTxId);
+            await handleProposalQueued(electionAddress, proposalId, timelockTxId);
           }
 
           // ProposalExecuted
-          const eEvents = await govContract.queryFilter('ProposalExecuted', startBlock, currentBlock);
+          const eEvents = await electionContract.queryFilter('ProposalExecuted', startBlock, currentBlock);
           for (const ev of eEvents) {
             const [proposalId] = ev.args;
-            await handleProposalExecuted(daoAddress, proposalId);
+            await handleProposalExecuted(electionAddress, proposalId);
           }
 
           // ProposalCancelled
-          const cEvents = await govContract.queryFilter('ProposalCancelled', startBlock, currentBlock);
+          const cEvents = await electionContract.queryFilter('ProposalCancelled', startBlock, currentBlock);
           for (const ev of cEvents) {
             const [proposalId] = ev.args;
-            await handleProposalCancelled(daoAddress, proposalId, ev);
+            await handleProposalCancelled(electionAddress, proposalId, ev);
           }
 
           // Treasury TransactionExecuted
-          if (dao.treasuryAddress) {
-            const treasuryContract = getTreasuryContract(dao.treasuryAddress);
+          if (election.treasuryAddress) {
+            const treasuryContract = getTreasuryContract(election.treasuryAddress);
             if (treasuryContract) {
               const tEvents = await treasuryContract.queryFilter('TransactionExecuted', startBlock, currentBlock);
               for (const ev of tEvents) {
                 const [txId] = ev.args;
-                await handleTransactionExecuted(dao.treasuryAddress, daoAddress, txId);
+                await handleTransactionExecuted(election.treasuryAddress, electionAddress, txId);
               }
             }
           }
@@ -407,9 +376,7 @@ async function pollBlockchain() {
             { upsert: true }
           );
         } catch (err) {
-          logger.error(`Error polling events for DAO ${daoAddress}:`, err.message);
-          // If contract is not found or throws error on fresh node, mark it as synced up to currentBlock
-          // to prevent infinite retry loops
+          logger.error(`Error polling events for Election ${electionAddress}:`, err.message);
           await SyncState.findOneAndUpdate(
             { contractId: syncKey },
             { lastSyncedBlock: currentBlock },
@@ -425,9 +392,6 @@ async function pollBlockchain() {
   }
 }
 
-/**
- * Main entry point — starts block polling indexer.
- */
 async function startEventIndexer() {
   const provider = getProvider();
   if (!provider) {
@@ -435,17 +399,11 @@ async function startEventIndexer() {
     return;
   }
 
-  // Perform initial sync
   await pollBlockchain();
-
-  // Poll for new blocks every 2 seconds
   indexerInterval = setInterval(pollBlockchain, 2000);
   logger.info('🚀 Polling event indexer started successfully.');
 }
 
-/**
- * Stops event indexer polling.
- */
 async function stopEventIndexer() {
   if (indexerInterval) {
     clearInterval(indexerInterval);
@@ -455,4 +413,3 @@ async function stopEventIndexer() {
 }
 
 module.exports = { startEventIndexer, stopEventIndexer };
-

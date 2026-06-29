@@ -24,8 +24,9 @@ const config = {
 
   // --- Blockchain ---
   rpcUrl: process.env.RPC_URL,
-  daoFactoryAddress: process.env.DAO_FACTORY_ADDRESS,
+  electionFactoryAddress: process.env.ELECTION_FACTORY_ADDRESS,
   bloomTokenAddress: process.env.BLOOM_TOKEN_ADDRESS,
+  adminPrivateKey: process.env.ADMIN_PRIVATE_KEY,
 
   // --- CORS ---
   corsOrigin: process.env.CORS_ORIGIN || 'http://localhost:5173',
@@ -46,7 +47,7 @@ const config = {
  * Validate that critical variables are present.
  * The server will refuse to start if any are missing — fail fast.
  */
-const requiredVars = ['rpcUrl', 'daoFactoryAddress'];
+const requiredVars = ['rpcUrl', 'electionFactoryAddress'];
 for (const key of requiredVars) {
   if (!config[key] || config[key].includes('0x000000000000000000000000000000000000')) {
     if (config.isProduction) {

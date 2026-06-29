@@ -8,6 +8,9 @@
 const express = require('express');
 const router = express.Router();
 
+const orgRoutes = require('./orgRoutes');
+const electionRoutes = require('./electionRoutes');
+const verificationRoutes = require('./verificationRoutes');
 const daoRoutes = require('./daoRoutes');
 const proposalRoutes = require('./proposalRoutes');
 const voteRoutes = require('./voteRoutes');
@@ -26,6 +29,9 @@ router.get('/health', (req, res) => {
 });
 
 // Mount resource routes
+router.use('/organizations', orgRoutes);
+router.use('/elections', electionRoutes);
+router.use('/verifications', verificationRoutes);
 router.use('/daos', daoRoutes);
 router.use('/proposals', proposalRoutes);
 router.use('/votes', voteRoutes);

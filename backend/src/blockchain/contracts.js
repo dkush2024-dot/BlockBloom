@@ -1,55 +1,48 @@
 /**
  * Contract Instances Module
- *
- * Pre-configures ethers.js Contract objects for every contract the backend
- * needs to interact with. Other modules import from here instead of
- * constructing contracts themselves.
- *
- * DATA FLOW:
- *   config (addresses) + ABI files + provider → Contract instances
  */
 
 const config = require('../config');
-const { getContract } = require('./provider');
+const { getContract, getProvider } = require('./provider');
+const { ethers } = require('ethers');
 
 // ABIs
-const DAOFactoryABI = require('./abi/DAOFactory.json').abi;
-const GovernanceABI = require('./abi/Governance.json').abi;
-const TreasuryABI = require('./abi/Treasury.json').abi;
+const ElectionFactoryABI = require('./abis/ElectionFactory.json');
+const ElectionABI = require('./abis/Election.json');
+const TreasuryABI = require('./abis/Treasury.json');
 
-/**
- * Returns the DAOFactory contract instance.
- */
-function getDAOFactoryContract() {
-  if (!config.daoFactoryAddress) return null;
-  return getContract(config.daoFactoryAddress, DAOFactoryABI);
+function getElectionFactoryContract() {
+  if (!config.electionFactoryAddress) return null;
+  return getContract(config.electionFactoryAddress, ElectionFactoryABI);
 }
 
-/**
- * Returns a Governance contract instance for a specific DAO address.
- * Used dynamically — each DAO deploys its own Governance contract.
- *
- * @param {string} daoAddress - The deployed Governance contract address
- */
-function getGovernanceContract(daoAddress) {
-  return getContract(daoAddress, GovernanceABI);
+function getElectionContract(electionAddress) {
+  return getContract(electionAddress, ElectionABI);
 }
 
-/**
- * Returns a Treasury contract instance for a specific Treasury address.
- * Used dynamically.
- *
- * @param {string} treasuryAddress - The deployed Treasury contract address
- */
 function getTreasuryContract(treasuryAddress) {
   return getContract(treasuryAddress, TreasuryABI);
 }
 
+// Phase 4: Admin wallet instance
+function getAdminWallet() {
+  const provider = getProvider();
+  if (!provider || !config.adminPrivateKey) return null;
+  return new ethers.Wallet(config.adminPrivateKey, provider);
+}
+
+function getElectionContractWithSigner(electionAddress) {
+  const adminWallet = getAdminWallet();
+  if (!adminWallet) return null;
+  return new ethers.Contract(electionAddress, ElectionABI, adminWallet);
+}
+
 module.exports = {
-  getDAOFactoryContract,
-  getGovernanceContract,
+  getElectionFactoryContract,
+  getElectionContract,
   getTreasuryContract,
-  GovernanceABI,
-  DAOFactoryABI,
+  getElectionContractWithSigner,
+  ElectionFactoryABI,
+  ElectionABI,
   TreasuryABI,
 };

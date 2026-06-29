@@ -14,13 +14,17 @@ import { ToastProvider } from './context/ToastContext';
 
 const queryClient = new QueryClient();
 
+import { AuthProvider } from './context/AuthContext';
+
 function RainbowKitWrapper() {
   const { isDark } = useTheme();
   return (
     <RainbowKitProvider theme={isDark ? darkTheme() : lightTheme()}>
-      <ToastProvider>
-        <App />
-      </ToastProvider>
+      <AuthProvider>
+        <ToastProvider>
+          <App />
+        </ToastProvider>
+      </AuthProvider>
     </RainbowKitProvider>
   );
 }
