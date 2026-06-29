@@ -1,22 +1,21 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
-import "@openzeppelin/contracts/token/ERC20/extensions/ERC20Votes.sol";
+import "@openzeppelin/contracts/access/Ownable.sol";
+import "@openzeppelin/contracts/utils/cryptography/MerkleProof.sol";
 import "./Treasury.sol";
 
-contract Governance {
+contract Election is Ownable {
     string public name;
     uint256 public proposalCount;
-    ERC20Votes public bloomToken;
     Treasury public treasury;
-    uint256 public proposalThreshold; // Minimum tokens required to create a proposal
-    uint256 public quorumPercentage; // Percentage of total token supply required to vote (e.g. 10 for 10%)
+    uint256 public quorumVotes; // Absolute number of votes required to pass a proposal
+    bytes32 public merkleRoot; // Root of the Merkle tree of whitelisted voters
 
     struct Proposal {
         uint256 id;
         address proposer;
         string description;
-        uint256 snapshotBlock; // The block number representing the voting power snapshot
         uint256 endTime;
         bool executed;
         string[] optionNames;
@@ -31,19 +30,29 @@ contract Governance {
     // proposalId => wallet => hasVoted
     mapping(uint256 => mapping(address => bool)) public hasVoted;
 
-    event ProposalCreated(uint256 id, address proposer, string description, uint256 snapshotBlock, uint256 endTime, address target, uint256 value);
-    event VoteCast(uint256 proposalId, address voter, uint256 optionIndex, uint256 weight);
+    event ProposalCreated(uint256 id, address proposer, string description, uint256 endTime, address target, uint256 value);
+    event VoteCast(uint256 proposalId, address voter, uint256 optionIndex);
     event ProposalQueued(uint256 proposalId, bytes32 timelockTxId);
     event ProposalExecuted(uint256 proposalId);
     event ProposalCancelled(uint256 proposalId);
+    event MerkleRootUpdated(bytes32 newRoot);
 
-    constructor(string memory _name, address _tokenAddress, uint256 _proposalThreshold, uint256 _timelockDelay, uint256 _quorumPercentage) {
+    constructor(
+        string memory _name,
+        uint256 _timelockDelay,
+        uint256 _quorumVotes,
+        address _admin
+    ) Ownable(_admin) {
         name = _name;
-        bloomToken = ERC20Votes(_tokenAddress);
-        proposalThreshold = _proposalThreshold;
-        quorumPercentage = _quorumPercentage;
-        // Each DAO automatically gets its own Treasury with the specified timelock delay
+        quorumVotes = _quorumVotes;
+        // Each Election automatically gets its own Treasury with the specified timelock delay
         treasury = new Treasury(address(this), _timelockDelay);
+    }
+
+    /// @notice Set the Merkle Root for the voter whitelist. Only callable by the Election Admin.
+    function setMerkleRoot(bytes32 _merkleRoot) external onlyOwner {
+        merkleRoot = _merkleRoot;
+        emit MerkleRootUpdated(_merkleRoot);
     }
 
     /// @notice Create a standard (non-financial) proposal
@@ -76,7 +85,12 @@ contract Governance {
         address payable _target,
         uint256 _value
     ) internal returns (uint256) {
-        require(bloomToken.getVotes(msg.sender) >= proposalThreshold, "Voting power below proposal threshold");
+        // We no longer check for a proposal threshold using tokens.
+        // Instead, we verify the creator is whitelisted or simply allow the admin to create proposals.
+        // To keep it open to any verified student, we can just require a proof, OR 
+        // to simplify, only the owner (admin) can create proposals in real elections.
+        // Let's assume only the Admin can create proposals for this Election instance.
+        require(msg.sender == owner(), "Only Admin can create proposals");
         require(_options.length > 1, "Must have at least 2 options");
 
         proposalCount++;
@@ -86,7 +100,6 @@ contract Governance {
         newProposal.id = currentId;
         newProposal.proposer = msg.sender;
         newProposal.description = _description;
-        newProposal.snapshotBlock = block.number;
         newProposal.endTime = block.timestamp + (_durationMinutes * 1 minutes);
         newProposal.executed = false;
         newProposal.optionNames = _options;
@@ -94,31 +107,35 @@ contract Governance {
         newProposal.target = _target;
         newProposal.value = _value;
 
-        emit ProposalCreated(currentId, msg.sender, _description, newProposal.snapshotBlock, newProposal.endTime, _target, _value);
+        emit ProposalCreated(currentId, msg.sender, _description, newProposal.endTime, _target, _value);
 
         return currentId;
     }
 
-    function vote(uint256 _proposalId, uint256 _optionIndex) public {
+    /// @notice Vote on a proposal using a Merkle Proof to verify eligibility
+    function vote(uint256 _proposalId, uint256 _optionIndex, bytes32[] calldata _merkleProof) public {
         require(_proposalId > 0 && _proposalId <= proposalCount, "Invalid proposal ID");
 
         Proposal storage p = proposals[_proposalId];
-        require(block.number > p.snapshotBlock, "Voting starts in the block after proposal creation");
         require(block.timestamp <= p.endTime, "Voting has ended");
         require(!hasVoted[_proposalId][msg.sender], "Already voted on this proposal");
         require(_optionIndex < p.optionNames.length, "Invalid option index");
+        require(merkleRoot != bytes32(0), "Voter whitelist not set");
 
-        uint256 weight = bloomToken.getPastVotes(msg.sender, p.snapshotBlock);
-        require(weight > 0, "No voting power");
+        // Verify the voter is in the Merkle tree
+        bytes32 leaf = keccak256(bytes.concat(keccak256(abi.encode(msg.sender))));
+        require(MerkleProof.verify(_merkleProof, merkleRoot, leaf), "Not whitelisted to vote");
 
+        // Record the vote
         hasVoted[_proposalId][msg.sender] = true;
-        p.optionVotes[_optionIndex] += weight;
+        p.optionVotes[_optionIndex] += 1; // 1 Student = 1 Vote
 
-        emit VoteCast(_proposalId, msg.sender, _optionIndex, weight);
+        emit VoteCast(_proposalId, msg.sender, _optionIndex);
     }
 
-    /// @notice Execute a passed proposal. For financial proposals, this queues the
-    ///         transaction in the Treasury's timelock. Option 0 must have the most votes.
+    /// @notice Execute a passed proposal. Identifies the winning option dynamically.
+    ///         For financial proposals, it queues the transaction in the Treasury's timelock
+    ///         only if Option 0 (e.g., "Approve") wins.
     function executeProposal(uint256 _proposalId) public {
         require(_proposalId > 0 && _proposalId <= proposalCount, "Invalid proposal ID");
 
@@ -126,24 +143,29 @@ contract Governance {
         require(block.timestamp > p.endTime, "Voting has not ended yet");
         require(!p.executed, "Proposal already executed");
 
-        // Check that option 0 (e.g., "Yes" / "Approve") won and calculate total votes for quorum
-        uint256 winningVotes = p.optionVotes[0];
-        uint256 totalVotes = winningVotes;
-        for (uint256 i = 1; i < p.optionVotes.length; i++) {
-            require(winningVotes >= p.optionVotes[i], "Option 0 did not win");
-            totalVotes += p.optionVotes[i];
-        }
-        require(winningVotes > 0, "No votes were cast");
+        uint256 winningVotes = 0;
+        uint256 winningOptionIndex = 0;
+        uint256 totalVotes = 0;
+        uint256 numOptions = p.optionVotes.length;
 
-        // Enforce Quorum
-        uint256 totalSupplyAtSnapshot = bloomToken.getPastTotalSupply(p.snapshotBlock);
-        uint256 requiredQuorum = (totalSupplyAtSnapshot * quorumPercentage) / 100;
-        require(totalVotes >= requiredQuorum, "Quorum not met");
+        for (uint256 i = 0; i < numOptions; i++) {
+            uint256 votes = p.optionVotes[i];
+            totalVotes += votes;
+            if (votes > winningVotes) {
+                winningVotes = votes;
+                winningOptionIndex = i;
+            }
+        }
+        require(totalVotes > 0, "No votes were cast");
+
+        // Enforce absolute quorum votes
+        require(totalVotes >= quorumVotes, "Quorum not met");
 
         p.executed = true;
 
         // If this is a financial proposal, queue the transaction in the Treasury
-        if (p.target != address(0) && p.value > 0) {
+        // Note: Financial proposals only queue if Option 0 ("Approve") won.
+        if (p.target != address(0) && p.value > 0 && winningOptionIndex == 0) {
             bytes32 txId = treasury.queueTransaction(p.target, p.value);
             p.timelockTxId = txId;
             emit ProposalQueued(_proposalId, txId);
@@ -179,7 +201,6 @@ contract Governance {
         uint256 id,
         address proposer,
         string memory description,
-        uint256 snapshotBlock,
         uint256 endTime,
         bool executed,
         string[] memory optionNames,
@@ -193,7 +214,6 @@ contract Governance {
             p.id,
             p.proposer,
             p.description,
-            p.snapshotBlock,
             p.endTime,
             p.executed,
             p.optionNames,

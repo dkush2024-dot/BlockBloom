@@ -25,8 +25,8 @@ contract BloomToken is ERC20, ERC20Pausable, ERC20Permit, ERC20Votes, AccessCont
         _mint(msg.sender, initialSupply);
     }
 
-    /// @notice Mint new tokens. Only callable by Owner.
-    function mint(address to, uint256 amount) public onlyOwner {
+    /// @notice Mint new tokens. Only callable by MINTER_ROLE.
+    function mint(address to, uint256 amount) public onlyRole(MINTER_ROLE) {
         _mint(to, amount);
     }
 
