@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
-import { useAccount, useSignMessage } from 'wagmi';
+import { useAccount, useSignMessage, useChainId } from 'wagmi';
 import { SiweMessage } from 'siwe';
 
 const AuthContext = createContext();
@@ -7,6 +7,7 @@ const AuthContext = createContext();
 export function AuthProvider({ children }) {
   const { address, isConnected } = useAccount();
   const { signMessageAsync } = useSignMessage();
+  const chainId = useChainId();
   const [token, setToken] = useState(localStorage.getItem('token'));
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -82,13 +83,13 @@ export function AuthProvider({ children }) {
 
   // Automatically prompt login if wallet connects but no token
   useEffect(() => {
-    if (isConnected && !token && !loading) {
-      // Assuming chainId is 31337 for hardhat
-      login(31337);
+    if (isConnected && !token && !loading && chainId) {
+      // Use actual connected network chainId (works for Hardhat=31337, Sepolia=11155111, etc.)
+      login(chainId);
     } else if (!isConnected && token) {
       logout();
     }
-  }, [isConnected, token, loading]);
+  }, [isConnected, token, loading, chainId]);
 
   return (
     <AuthContext.Provider value={{ token, user, loading, login, logout }}>
