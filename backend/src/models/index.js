@@ -10,5 +10,10 @@ const SyncState = require('./SyncState');
 const DraftProposal = require('./DraftProposal');
 const ChatSession = require('./ChatSession');
 const GovernanceDoc = require('./GovernanceDoc');
+const User = require('./User');
+const Organization = require('./Organization');
+const Department = require('./Department');
+const Election = require('./Election');
+const StudentVerification = require('./StudentVerification');
 
-module.exports = { DAO, Proposal, Vote, SyncState, DraftProposal, ChatSession, GovernanceDoc };
+module.exports = { DAO, Proposal, Vote, SyncState, DraftProposal, ChatSession, GovernanceDoc, User, Organization, Department, Election, StudentVerification };

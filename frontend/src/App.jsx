@@ -2,12 +2,20 @@ import { BrowserRouter, Routes, Route, Link } from "react-router-dom";
 import { ConnectButton } from "@rainbow-me/rainbowkit";
 import Home from "./pages/Home";
 import DAODashboard from "./pages/DAODashboard";
-import Leaderboard from "./pages/Leaderboard";
 import Profile from "./pages/Profile";
+import Leaderboard from "./pages/Leaderboard";
+import ElectionDashboard from "./pages/ElectionDashboard";
+import ElectionVote from "./pages/ElectionVote";
 import { useTheme } from "./utils/ThemeContext";
+import { useAuth } from "./context/AuthContext";
+import ProtectedRoute from "./components/ProtectedRoute";
+
+// Placeholder for Organizations page
+const Organizations = () => <div className="p-8"><h1 className="text-2xl font-bold">Organizations</h1></div>;
 
 function App() {
   const { isDark, toggleTheme } = useTheme();
+  const { user } = useAuth();
 
   return (
     <BrowserRouter>
@@ -26,6 +34,7 @@ function App() {
             </div>
             
             <div className="flex space-x-6 items-center">
+              <Link to="/organizations" className="text-sm font-semibold text-gray-600 dark:text-slate-300 hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors">Organizations</Link>
               <Link to="/" className="text-sm font-semibold text-gray-600 dark:text-slate-300 hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors">DAOs</Link>
               <Link to="/leaderboard" className="text-sm font-semibold text-gray-600 dark:text-slate-300 hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors">Leaderboard</Link>
               
@@ -49,6 +58,12 @@ function App() {
               </button>
               
               <ConnectButton />
+              
+              {user && (
+                <span className="px-2 py-1 text-xs font-semibold rounded-full bg-indigo-100 text-indigo-800 dark:bg-indigo-900 dark:text-indigo-200">
+                  {user.role.toUpperCase()}
+                </span>
+              )}
             </div>
           </div>
         </nav>
@@ -58,6 +73,9 @@ function App() {
           <Routes>
             <Route path="/" element={<Home />} />
             <Route path="/dao/:address" element={<DAODashboard />} />
+            <Route path="/elections/:address" element={<ElectionDashboard />} />
+            <Route path="/elections/:address/proposals/:proposalId/vote" element={<ElectionVote />} />
+            <Route path="/organizations" element={<ProtectedRoute requiredRoles={['superadmin', 'admin']}><Organizations /></ProtectedRoute>} />
             <Route path="/leaderboard" element={<Leaderboard />} />
             <Route path="/profile/:walletAddress" element={<Profile />} />
             <Route path="*" element={<div className="text-center py-20 text-gray-500 dark:text-slate-400">Page not found</div>} />
