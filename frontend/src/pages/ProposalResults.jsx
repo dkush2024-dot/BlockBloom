@@ -4,7 +4,7 @@ import { useAuth } from '../context/AuthContext';
 import { useAccount } from 'wagmi';
 import { ethers } from 'ethers';
 import { getEthersProvider, getEthersSigner } from '../utils/adapters';
-import ElectionABI from '../../../backend/src/blockchain/abis/Election.json';
+import ElectionABI from '../abis/Election.json';
 import { useToast } from '../context/ToastContext';
 import { io } from 'socket.io-client';
 

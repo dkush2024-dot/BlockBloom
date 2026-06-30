@@ -3,7 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { ethers } from 'ethers';
 import { getEthersProvider, getEthersSigner } from '../utils/adapters';
-import ElectionABI from '../../../backend/src/blockchain/abis/Election.json';
+import ElectionABI from '../abis/Election.json';
 import { useToast } from '../context/ToastContext';
 
 const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:5000/api';

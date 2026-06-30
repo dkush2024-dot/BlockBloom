@@ -4,7 +4,7 @@ import { useAuth } from '../context/AuthContext';
 import { useAccount } from 'wagmi';
 import { ethers } from 'ethers';
 import { getEthersSigner } from '../utils/adapters';
-import ElectionABI from '../../../backend/src/blockchain/abis/Election.json';
+import ElectionABI from '../abis/Election.json';
 import { useToast } from '../context/ToastContext';
 
 const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:5000/api';
