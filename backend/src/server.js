@@ -45,6 +45,8 @@ const errorHandler = require('./api/middleware/errorHandler');
 const notFoundHandler = require('./api/middleware/notFoundHandler');
 const { initializeWebSocket } = require('./websocket/socketManager');
 const { startEventIndexer, stopEventIndexer } = require('./events/eventIndexer');
+const { connectRabbitMQ, closeRabbitMQ } = require('./config/rabbitmq');
+const { startWorker } = require('./workers/eventWorker');
 const cron = require('node-cron');
 const proposalService = require('./services/proposalService');
 
@@ -120,10 +122,14 @@ async function startServer() {
     // Step 1: Connect to MongoDB
     await connectDatabase();
 
-    // Step 2: Start the blockchain event indexer
+    // Step 2: Connect to RabbitMQ and start workers
+    await connectRabbitMQ();
+    await startWorker();
+
+    // Step 3: Start the blockchain event indexer
     await startEventIndexer();
 
-    // Step 3: Start cron jobs
+    // Step 4: Start cron jobs
     cron.schedule('0 * * * *', async () => {
       logger.info('Running cron job: closeExpiredProposals');
       try {
@@ -171,6 +177,9 @@ async function gracefulShutdown(signal) {
     try {
       // Stop blockchain event listeners
       await stopEventIndexer();
+
+      // Close RabbitMQ connection
+      await closeRabbitMQ();
 
       // Close database connection
       await disconnectDatabase();

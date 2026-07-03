@@ -1,0 +1,52 @@
+name: Backend CI
+
+on:
+  push:
+    branches: [ "main", "kushagra/*", "develop" ]
+    paths:
+      - 'backend/**'
+  pull_request:
+    branches: [ "main" ]
+    paths:
+      - 'backend/**'
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    
+    services:
+      mongodb:
+        image: mongo:7
+        ports:
+          - 27017:27017
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+      rabbitmq:
+        image: rabbitmq:3-alpine
+        ports:
+          - 5672:5672
+
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Use Node.js 18
+      uses: actions/setup-node@v4
+      with:
+        node-version: 18
+        cache: 'npm'
+        cache-dependency-path: backend/package-lock.json
+        
+    - name: Install dependencies
+      working-directory: ./backend
+      run: npm ci
+      
+    - name: Run Build Check
+      working-directory: ./backend
+      # Assuming there's a build or lint script, otherwise just a syntax check
+      run: npm run lint --if-present
+
+    - name: Docker Build Test
+      working-directory: ./backend
+      run: docker build -t blockbloom/backend:test .

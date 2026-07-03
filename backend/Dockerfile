@@ -1,37 +1,29 @@
-# Dockerfile for BlockBloom Backend
-
-# Stage 1: Build & Dependencies
+# Stage 1: Build & deps
 FROM node:18-alpine AS builder
 
-WORKDIR /app
+WORKDIR /usr/src/app
 
-# Copy package files
-COPY package.json package-lock.json ./
+COPY package*.json ./
+RUN npm ci --omit=dev
 
-# Install all dependencies (including devDependencies for building if needed)
-RUN npm ci
+COPY src/ ./src/
 
-# Copy the rest of the application
-COPY . .
-
-# Stage 2: Production Image
+# Stage 2: Production runtime
 FROM node:18-alpine
 
-WORKDIR /app
+WORKDIR /usr/src/app
 
-# Set production environment
+# Only copy over the node_modules and src code from builder
+COPY --from=builder /usr/src/app/node_modules ./node_modules
+COPY --from=builder /usr/src/app/src ./src
+COPY --from=builder /usr/src/app/package.json ./package.json
+
 ENV NODE_ENV=production
+ENV PORT=5000
 
-# Copy built node_modules and app code from the builder stage
-COPY --from=builder /app/node_modules ./node_modules
-COPY --from=builder /app/src ./src
-COPY --from=builder /app/package.json ./package.json
-
-# Security: Don't run as root
-USER node
-
-# Expose the API port
 EXPOSE 5000
 
-# Start the application
+# Start server as non-root user for security
+USER node
+
 CMD ["npm", "start"]

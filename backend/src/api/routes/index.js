@@ -17,14 +17,37 @@ const voteRoutes = require('./voteRoutes');
 const authRoutes = require('./authRoutes');
 const draftRoutes = require('./draftRoutes');
 const aiRoutes = require('./aiRoutes');
+const adminRoutes = require('./adminRoutes');
+
+const mongoose = require('mongoose');
+const redis = require('../../config/redis');
+const rabbitmq = require('../../config/rabbitmq');
 
 // Health check endpoint — useful for load balancers and monitoring
-router.get('/health', (req, res) => {
-  res.json({
-    success: true,
-    message: 'BlockBloom Backend is running',
+router.get('/health', async (req, res) => {
+  const mongoStatus = mongoose.connection.readyState === 1 ? 'up' : 'down';
+  const redisStatus = redis.isOpen ? 'up' : 'down';
+  
+  let rabbitmqStatus = 'down';
+  try {
+    const channel = rabbitmq.getChannel();
+    if (channel) rabbitmqStatus = 'up';
+  } catch(e) {
+    // Channel not ready
+  }
+
+  const isHealthy = mongoStatus === 'up' && redisStatus === 'up' && rabbitmqStatus === 'up';
+
+  res.status(isHealthy ? 200 : 503).json({
+    success: isHealthy,
+    message: isHealthy ? 'All systems operational' : 'Degraded state',
     timestamp: new Date().toISOString(),
     uptime: process.uptime(),
+    services: {
+      mongodb: mongoStatus,
+      redis: redisStatus,
+      rabbitmq: rabbitmqStatus,
+    }
   });
 });
 
@@ -38,5 +61,6 @@ router.use('/votes', voteRoutes);
 router.use('/auth', authRoutes);
 router.use('/drafts', draftRoutes);
 router.use('/ai', aiRoutes);
+router.use('/admin', adminRoutes);
 
 module.exports = router;
