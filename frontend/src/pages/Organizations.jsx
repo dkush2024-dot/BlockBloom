@@ -83,6 +83,7 @@ export default function Organizations() {
 
   const [orgs, setOrgs] = useState([]);
   const [elections, setElections] = useState({});          // orgId -> elections[]
+  const [loadingElections, setLoadingElections] = useState({});  // orgId -> bool
   const [loadingOrgs, setLoadingOrgs] = useState(true);
   const [expandedOrg, setExpandedOrg] = useState(null);
 
@@ -95,6 +96,7 @@ export default function Organizations() {
   // Create Org form
   const [orgName, setOrgName] = useState('');
   const [orgDesc, setOrgDesc] = useState('');
+  const [orgAdminAddress, setOrgAdminAddress] = useState('');
   const [creatingOrg, setCreatingOrg] = useState(false);
 
   // Create Election form
@@ -109,6 +111,7 @@ export default function Organizations() {
   const [creatingDept, setCreatingDept] = useState(false);
 
   const isAdmin = user?.role === 'admin' || user?.role === 'superadmin';
+  const isSuperAdmin = user?.role === 'superadmin';
 
   // ── Fetch ──────────────────────────────────────────────────────────────────
   const fetchOrgs = async () => {
@@ -125,6 +128,7 @@ export default function Organizations() {
   };
 
   const fetchElectionsForOrg = async (orgId) => {
+    setLoadingElections(prev => ({ ...prev, [orgId]: true }));
     try {
       const res = await fetch(`${API_BASE}/elections?orgId=${orgId}`);
       const data = await res.json();
@@ -133,6 +137,8 @@ export default function Organizations() {
       }
     } catch (e) {
       console.error('Failed to load elections for org', orgId);
+    } finally {
+      setLoadingElections(prev => ({ ...prev, [orgId]: false }));
     }
   };
 
@@ -140,15 +146,14 @@ export default function Organizations() {
     fetchOrgs();
   }, []);
 
-  // Toggle org expansion and lazy-load elections
+  // Toggle org expansion and always re-fetch elections
   const handleToggleOrg = (orgId) => {
     if (expandedOrg === orgId) {
       setExpandedOrg(null);
     } else {
       setExpandedOrg(orgId);
-      if (!elections[orgId]) {
-        fetchElectionsForOrg(orgId);
-      }
+      // Always re-fetch to get the latest elections (don't use stale cache)
+      fetchElectionsForOrg(orgId);
     }
   };
 
@@ -158,16 +163,21 @@ export default function Organizations() {
     if (!orgName.trim()) return;
     setCreatingOrg(true);
     try {
+      const body = { name: orgName.trim(), description: orgDesc.trim() };
+      // SuperAdmin can assign a specific admin wallet
+      if (isSuperAdmin && orgAdminAddress.trim()) {
+        body.adminAddress = orgAdminAddress.trim();
+      }
       const res = await fetch(`${API_BASE}/organizations`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ name: orgName.trim(), description: orgDesc.trim() }),
+        body: JSON.stringify(body),
       });
       const data = await res.json();
       if (data.success) {
         showToast(`Organization "${orgName}" created! 🎉`, 'success');
         setShowCreateOrg(false);
-        setOrgName(''); setOrgDesc('');
+        setOrgName(''); setOrgDesc(''); setOrgAdminAddress('');
         fetchOrgs();
       } else {
         showToast(data.error || 'Failed to create organization', 'error');
@@ -197,12 +207,25 @@ export default function Organizations() {
         throw new Error('ElectionFactory contract not found in contracts.json. Run deploy-local.js first.');
       }
 
+      // Fetch backend admin address to set as election owner
+      let adminAddress = '0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266'; // fallback to standard Hardhat Account #0
+      try {
+        const configRes = await fetch(`${import.meta.env.VITE_API_BASE || 'http://localhost:5000/api'}/auth/admin-address`);
+        const configData = await configRes.json();
+        if (configData.success && configData.adminAddress) {
+          adminAddress = configData.adminAddress;
+        }
+      } catch (configErr) {
+        console.warn('Failed to fetch backend admin address, falling back to local default', configErr);
+      }
+
       const factory = new ethers.Contract(factoryAddress, factoryABI, signer);
       const tx = await factory.createElection(
         targetOrgId,
         electionName.trim(),
         BigInt(timelockDelay),
-        BigInt(quorumVotes)
+        BigInt(quorumVotes),
+        adminAddress
       );
       showToast('Transaction submitted, waiting for confirmation...', 'info');
       await tx.wait();
@@ -211,8 +234,12 @@ export default function Organizations() {
       setShowCreateElection(false);
       setElectionName(''); setTimelockDelay('60'); setQuorumVotes('3');
 
-      // Refresh elections for this org after a short delay for the indexer
-      setTimeout(() => fetchElectionsForOrg(targetOrgId), 3000);
+      // Refresh elections for this org after delay to allow indexer to process
+      // Clear old cache first so we always show fresh data
+      setElections(prev => ({ ...prev, [targetOrgId]: undefined }));
+      setTimeout(() => fetchElectionsForOrg(targetOrgId), 5000);
+      // Also do a second refresh in case indexer was slow
+      setTimeout(() => fetchElectionsForOrg(targetOrgId), 10000);
     } catch (err) {
       console.error(err);
       showToast(err.message || 'Failed to deploy election', 'error');
@@ -260,7 +287,7 @@ export default function Organizations() {
             Multi-org election hub — browse organizations and their elections.
           </p>
         </div>
-        {isAdmin && (
+        {isSuperAdmin && (
           <button
             onClick={() => setShowCreateOrg(true)}
             className="bg-indigo-600 hover:bg-indigo-700 text-white font-semibold py-2.5 px-5 rounded-xl shadow-sm transition-all duration-200 flex items-center gap-2"
@@ -283,7 +310,7 @@ export default function Organizations() {
           <div className="w-14 h-14 rounded-2xl bg-indigo-50 dark:bg-indigo-950/30 flex items-center justify-center mx-auto mb-4 text-2xl">🏛️</div>
           <h3 className="text-lg font-bold text-gray-900 dark:text-white mb-1">No organizations yet</h3>
           <p className="text-gray-500 dark:text-slate-400 mb-6">Create the first organization to start hosting elections.</p>
-          {isAdmin && (
+          {isSuperAdmin && (
             <button
               onClick={() => setShowCreateOrg(true)}
               className="bg-indigo-600 hover:bg-indigo-700 text-white font-semibold py-2 px-6 rounded-lg transition-colors"
@@ -345,15 +372,28 @@ export default function Organizations() {
               {expandedOrg === org._id && (
                 <div className="border-t border-gray-100 dark:border-slate-800 px-6 py-5 bg-gray-50/50 dark:bg-[#0e1320]/60">
                   <h3 className="text-xs font-semibold uppercase tracking-wider text-gray-400 dark:text-slate-500 mb-4">Elections</h3>
-                  {!elections[org._id] ? (
+                  {loadingElections[org._id] ? (
+                    <div className="flex items-center gap-2 text-sm text-gray-400 py-2">
+                      <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-indigo-500" />
+                      Loading elections...
+                    </div>
+                  ) : elections[org._id] === undefined ? (
                     <div className="flex items-center gap-2 text-sm text-gray-400 py-2">
                       <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-indigo-500" />
                       Loading elections...
                     </div>
                   ) : elections[org._id].length === 0 ? (
-                    <p className="text-sm text-gray-400 dark:text-slate-500 py-2">
-                      No elections yet.{isAdmin && ' Click "+ Election" above to deploy one.'}
-                    </p>
+                    <div className="flex flex-col gap-2">
+                      <p className="text-sm text-gray-400 dark:text-slate-500 py-2">
+                        No elections yet.{isAdmin && ' Click "+ Election" above to deploy one.'}
+                      </p>
+                      <button
+                        onClick={() => fetchElectionsForOrg(org._id)}
+                        className="text-xs text-indigo-500 hover:text-indigo-700 underline self-start"
+                      >
+                        ↻ Refresh
+                      </button>
+                    </div>
                   ) : (
                     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
                       {elections[org._id].map(el => (
@@ -411,6 +451,15 @@ export default function Organizations() {
               className="w-full border border-gray-200 dark:border-slate-700 rounded-xl px-4 py-2.5 text-sm text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-slate-600 bg-white dark:bg-[#0b0f19] focus:outline-none focus:ring-2 focus:ring-indigo-500 resize-none"
             />
           </Field>
+          {isSuperAdmin && (
+            <Field label="Admin Wallet Address" hint="The MetaMask wallet that will manage this org's elections. Leave blank to assign yourself.">
+              <Input
+                value={orgAdminAddress}
+                onChange={e => setOrgAdminAddress(e.target.value)}
+                placeholder="0x70997970C51812dc3A010C7d01b50e0d17dc79C8"
+              />
+            </Field>
+          )}
           <PrimaryBtn type="submit" loading={creatingOrg}>Create Organization</PrimaryBtn>
         </form>
       </Modal>

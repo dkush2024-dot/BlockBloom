@@ -143,24 +143,36 @@ function Home() {
     setDeploying(true);
     try {
       const provider = await getProvider();
-      await ensureContractDeployed(provider, contracts.DAOFactory.address, "DAOFactory");
+      await ensureContractDeployed(provider, contracts.ElectionFactory.address, "ElectionFactory");
       const signer = await getEthersSigner();
       if (!signer) {
         throw new Error("Wallet not connected. Please connect via RainbowKit.");
       }
 
       const factory = new Contract(
-        contracts.DAOFactory.address,
-        contracts.DAOFactory.abi,
+        contracts.ElectionFactory.address,
+        contracts.ElectionFactory.abi,
         signer
       );
 
-      const tx = await factory.createDAO(
+      // Fetch backend admin address to set as election owner
+      let adminAddress = '0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266'; // fallback to standard Hardhat Account #0
+      try {
+        const configRes = await fetch(`${import.meta.env.VITE_API_BASE || 'http://localhost:5000/api'}/auth/admin-address`);
+        const configData = await configRes.json();
+        if (configData.success && configData.adminAddress) {
+          adminAddress = configData.adminAddress;
+        }
+      } catch (configErr) {
+        console.warn('Failed to fetch backend admin address, falling back to local default', configErr);
+      }
+
+      const tx = await factory.createElection(
+        "default_org",
         daoName.trim(),
-        contracts.BloomToken.address,
-        BigInt(threshold),
         BigInt(timelockDelay),
-        BigInt(quorumPercentage)
+        BigInt(quorumPercentage), // passed as absolute quorum votes count
+        adminAddress
       );
       await tx.wait();
 
@@ -265,7 +277,7 @@ function Home() {
           {daos.map((dao, idx) => (
             <div
               key={idx}
-              onClick={() => navigate(`/dao/${dao.address}`)}
+              onClick={() => navigate(`/elections/${dao.address}`)}
               className="bg-white dark:bg-[#151b2c] rounded-3xl border border-gray-200 dark:border-slate-800 p-6 hover:shadow-lg transition-all duration-300 group cursor-pointer hover:border-indigo-200 dark:hover:border-indigo-900/50 flex flex-col h-full relative overflow-hidden"
             >
               <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-indigo-500 to-purple-500 opacity-0 group-hover:opacity-100 transition-opacity"></div>

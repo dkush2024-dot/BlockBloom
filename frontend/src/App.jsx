@@ -13,10 +13,13 @@ import AdminDashboard from "./pages/AdminDashboard";
 import { useTheme } from "./utils/ThemeContext";
 import { useAuth } from "./context/AuthContext";
 import ProtectedRoute from "./components/ProtectedRoute";
+import { useAccount, useChainId } from "wagmi";
 
 function App() {
   const { isDark, toggleTheme } = useTheme();
-  const { user } = useAuth();
+  const { user, token, login } = useAuth();
+  const { isConnected } = useAccount();
+  const chainId = useChainId();
 
   return (
     <BrowserRouter>
@@ -25,46 +28,51 @@ function App() {
         {/* ── Global Navigation Bar ── */}
         <nav className="bg-white dark:bg-[#0b0f19]/80 dark:backdrop-blur-md border-b border-gray-200 dark:border-slate-800 sticky top-0 z-50 shadow-sm transition-colors duration-300">
           <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
-            {/* Logo */}
-            <div className="flex items-center space-x-2">
-              <div className="w-8 h-8 bg-indigo-600 rounded-lg flex items-center justify-center text-white font-bold text-xl shadow-inner">
-                B
+            {/* Left section: Logo + Page Links */}
+            <div className="flex items-center space-x-8">
+              {/* Logo */}
+              <div className="flex items-center space-x-2 shrink-0">
+                <div className="w-8 h-8 bg-indigo-600 rounded-lg flex items-center justify-center text-white font-bold text-xl shadow-inner">
+                  B
+                </div>
+                <Link to="/" className="text-xl font-bold text-gray-900 dark:text-white tracking-tight">
+                  BlockBloom <span className="text-indigo-600">DAO</span>
+                </Link>
               </div>
-              <Link to="/" className="text-xl font-bold text-gray-900 dark:text-white tracking-tight">
-                BlockBloom <span className="text-indigo-600">DAO</span>
-              </Link>
+
+              {/* Page Links */}
+              <div className="hidden md:flex space-x-6 items-center">
+                <Link
+                  to="/organizations"
+                  className="text-sm font-bold text-gray-600 dark:text-slate-300 hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors"
+                >
+                  Organizations
+                </Link>
+                <Link
+                  to="/"
+                  className="text-sm font-bold text-gray-600 dark:text-slate-300 hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors"
+                >
+                  DAOs
+                </Link>
+                <Link
+                  to="/leaderboard"
+                  className="text-sm font-bold text-gray-600 dark:text-slate-300 hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors"
+                >
+                  Leaderboard
+                </Link>
+                {user && user.role === 'superadmin' && (
+                  <Link
+                    to="/admin"
+                    className="text-sm font-bold text-gray-600 dark:text-slate-300 hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors"
+                  >
+                    Admin Panel
+                  </Link>
+                )}
+              </div>
             </div>
 
-            {/* Nav Links */}
-            <div className="flex space-x-5 items-center">
-              <Link
-                to="/organizations"
-                className="text-sm font-semibold text-gray-600 dark:text-slate-300 hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors"
-              >
-                Organizations
-              </Link>
-              <Link
-                to="/"
-                className="text-sm font-semibold text-gray-600 dark:text-slate-300 hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors"
-              >
-                DAOs
-              </Link>
-              <Link
-                to="/leaderboard"
-                className="text-sm font-semibold text-gray-600 dark:text-slate-300 hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors"
-              >
-                Leaderboard
-              </Link>
-
-              {user && user.role === 'superadmin' && (
-                <Link
-                  to="/admin"
-                  className="text-sm font-semibold text-gray-600 dark:text-slate-300 hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors"
-                >
-                  Admin Panel
-                </Link>
-              )}
-
+            {/* Right section: Theme, SignIn, Connect, Role Badge */}
+            <div className="flex space-x-4 items-center">
               {/* Theme Toggle */}
               <button
                 onClick={toggleTheme}
@@ -83,12 +91,21 @@ function App() {
                 )}
               </button>
 
+              {isConnected && !token && (
+                <button
+                  onClick={() => login(chainId)}
+                  className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs rounded-xl shadow-sm hover:scale-102 active:scale-98 transition-all shrink-0"
+                >
+                  ⚡ Sign In
+                </button>
+              )}
+
               <ConnectButton />
 
               {/* Role Badge */}
               {user && (
-                <span className="px-2 py-1 text-xs font-semibold rounded-full bg-indigo-100 text-indigo-800 dark:bg-indigo-900 dark:text-indigo-200">
-                  {user.role.toUpperCase()}
+                <span className="px-2.5 py-1 text-[10px] font-extrabold rounded-xl bg-indigo-50 text-indigo-700 dark:bg-indigo-950/40 dark:text-indigo-400 uppercase border border-indigo-100 dark:border-indigo-900/30 shrink-0">
+                  {user.role}
                 </span>
               )}
             </div>

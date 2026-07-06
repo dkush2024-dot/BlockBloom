@@ -1,7 +1,8 @@
 const { loadFixture, time, mine } = require("@nomicfoundation/hardhat-toolbox/network-helpers");
 const { expect } = require("chai");
 const { ethers } = require("hardhat");
-const { StandardMerkleTree } = require("@openzeppelin/merkle-tree");
+const { MerkleTree } = require("merkletreejs");
+const keccak256 = require("keccak256");
 
 describe("Election & Treasury (Phase 3)", function () {
 
@@ -13,13 +14,21 @@ describe("Election & Treasury (Phase 3)", function () {
     const ElectionFactory = await ethers.getContractFactory("ElectionFactory");
     const factory = await ElectionFactory.deploy();
 
-    // Generate Merkle Tree for whitelisted voters: user1 and user2
-    const values = [
-      [user1.address],
-      [user2.address]
-    ];
-    const tree = StandardMerkleTree.of(values, ["address"]);
-    const merkleRoot = tree.root;
+    // Generate Merkle Tree for whitelisted voters using single hashing to match Election.sol
+    const addresses = [user1.address.toLowerCase(), user2.address.toLowerCase()];
+    const leaves = addresses.map(addr => keccak256(ethers.AbiCoder.defaultAbiCoder().encode(['address'], [addr])));
+    const mTree = new MerkleTree(leaves, keccak256, { sortPairs: true });
+    const merkleRoot = mTree.getHexRoot();
+
+    // Mock OZ StandardMerkleTree interface using merkletreejs
+    const tree = {
+      root: merkleRoot,
+      getProof: (value) => {
+        const addr = Array.isArray(value) ? value[0] : value;
+        const leaf = keccak256(ethers.AbiCoder.defaultAbiCoder().encode(['address'], [addr.toLowerCase()]));
+        return mTree.getHexProof(leaf);
+      }
+    };
 
     return { factory, owner, user1, user2, user3, recipient, tree, merkleRoot };
   }
@@ -31,9 +40,9 @@ describe("Election & Treasury (Phase 3)", function () {
       const timelockDelay = 60; // 60 seconds for testing
       const quorumVotes = 2;
 
-      await factory.connect(user1).createElection("org_123", "Student Council", timelockDelay, quorumVotes);
-      await factory.connect(user1).createElection("org_123", "President", timelockDelay, quorumVotes);
-      await factory.connect(user1).createElection("org_456", "Clubs", timelockDelay, quorumVotes);
+      await factory.connect(user1).createElection("org_123", "Student Council", timelockDelay, quorumVotes, user1.address);
+      await factory.connect(user1).createElection("org_123", "President", timelockDelay, quorumVotes, user1.address);
+      await factory.connect(user1).createElection("org_456", "Clubs", timelockDelay, quorumVotes, user1.address);
 
       const org1Elections = await factory.getElectionsByOrg("org_123");
       expect(org1Elections.length).to.equal(2);
@@ -65,7 +74,7 @@ describe("Election & Treasury (Phase 3)", function () {
       const quorumVotes = 2; // Need both user1 and user2 to vote
 
       // user1 creates the election, so user1 is the admin
-      await factory.connect(user1).createElection("org_treasury", "Treasury Election", TIMELOCK_DELAY, quorumVotes);
+      await factory.connect(user1).createElection("org_treasury", "Treasury Election", TIMELOCK_DELAY, quorumVotes, user1.address);
       const elections = await factory.getElectionsByOrg("org_treasury");
 
       const Election = await ethers.getContractFactory("Election");
@@ -250,7 +259,7 @@ describe("Election & Treasury (Phase 3)", function () {
       const { factory, owner, user1, user2, user3, recipient, tree, merkleRoot } = await deployContractsFixture();
       const quorumVotes = 2;
 
-      await factory.connect(user1).createElection("org_pausable", "Pausable Election", TIMELOCK_DELAY, quorumVotes);
+      await factory.connect(user1).createElection("org_pausable", "Pausable Election", TIMELOCK_DELAY, quorumVotes, user1.address);
       const elections = await factory.getElectionsByOrg("org_pausable");
 
       const Election = await ethers.getContractFactory("Election");

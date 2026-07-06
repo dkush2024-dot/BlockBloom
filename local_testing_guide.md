@@ -87,10 +87,11 @@ Follow this checklist to confirm all features are operating correctly:
 * Verify that the interface switches seamlessly between the dark theme and light theme.
 * Scroll down inside any container (e.g. the chat widget or leaderboard). Scrollbars should be slim, rounded, and adapt automatically to the color palette.
 
-### 3. 🌱 Multi-DAO Deployment & Proposals
-* Click **"+ Deploy New DAO"** on the home explore page.
-* Fill in details and click **"Deploy DAO"**. Sign the txn in MetaMask.
-* Click into your new DAO dashboard, and select **"+ New Proposal"**. Submit a new community initiative.
+### 3. 🏛️ Organizations & Election Deployment
+* Go to the **"Organizations"** page in the navigation bar.
+* If logged in as an admin or superadmin, click **"New Organization"** to create an organization.
+* Inside the expanded organization view, click **"Deploy Election"** to deploy an Election smart contract on-chain.
+* Within the election dashboard, upload a whitelist CSV to compute the Merkle root on-chain, and click **"Create Proposal"** to launch a new poll.
 
 ### 4. 🤖 Grounded AI Copilot Chat (Sidebar)
 * Click the floating blue robot chat bubble at the bottom right.

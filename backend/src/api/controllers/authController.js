@@ -54,11 +54,22 @@ class AuthController {
 
       // Upsert user in database
       let user = await User.findOne({ walletAddress: fields.address.toLowerCase() });
+      const addrLower = fields.address.toLowerCase();
+      let defaultRole = 'student';
+      if (addrLower === '0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266') {
+        defaultRole = 'superadmin';
+      } else if (addrLower === '0x70997970c51812dc3a010c7d01b50e0d17dc79c8') {
+        defaultRole = 'admin';
+      }
+
       if (!user) {
         user = await User.create({
-          walletAddress: fields.address.toLowerCase(),
-          role: 'student' // Default role for testing Phase 4
+          walletAddress: addrLower,
+          role: defaultRole
         });
+      } else if (user.role !== defaultRole && (defaultRole === 'superadmin' || defaultRole === 'admin')) {
+        user.role = defaultRole;
+        await user.save();
       }
 
       // Create JWT token
@@ -111,6 +122,20 @@ class AuthController {
    */
   getRoles(req, res) {
     res.json({ success: true, roles: ['superadmin', 'admin', 'student', 'user'] });
+  }
+
+  /**
+   * GET /api/auth/admin-address
+   * Returns the backend's admin wallet address (public)
+   */
+  getAdminAddress(req, res, next) {
+    try {
+      const { getAdminWallet } = require('../../blockchain/contracts');
+      const adminWallet = getAdminWallet();
+      res.json({ success: true, adminAddress: adminWallet ? adminWallet.address : null });
+    } catch (error) {
+      next(error);
+    }
   }
 }
 

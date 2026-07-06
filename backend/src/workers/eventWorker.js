@@ -1,4 +1,4 @@
-const { getChannel, QUEUE_NAME } = require('../config/rabbitmq');
+const { getChannel, QUEUE_NAME, fallbackEmitter } = require('../config/rabbitmq');
 const logger = require('../config/logger');
 const { Election, Proposal, Vote } = require('../models');
 const { emitGlobal, emitToDAO } = require('../websocket/socketManager');
@@ -262,7 +262,29 @@ async function startWorker() {
     
     channel.consume(QUEUE_NAME, processEvent, { noAck: false });
   } catch (error) {
-    logger.error('Failed to start Event Worker:', error);
+    logger.warn('⚠️ RabbitMQ not available. Falling back to In-Memory Event Worker subscriptions.');
+    
+    fallbackEmitter.on('election.created', async (data) => {
+      try { await handleElectionCreated(data); } catch (e) { logger.error('Error in fallback handleElectionCreated:', e); }
+    });
+    fallbackEmitter.on('proposal.created', async (data) => {
+      try { await handleProposalCreated(data); } catch (e) { logger.error('Error in fallback handleProposalCreated:', e); }
+    });
+    fallbackEmitter.on('vote.cast', async (data) => {
+      try { await handleVoteCast(data); } catch (e) { logger.error('Error in fallback handleVoteCast:', e); }
+    });
+    fallbackEmitter.on('proposal.queued', async (data) => {
+      try { await handleProposalQueued(data); } catch (e) { logger.error('Error in fallback handleProposalQueued:', e); }
+    });
+    fallbackEmitter.on('proposal.executed', async (data) => {
+      try { await handleProposalExecuted(data); } catch (e) { logger.error('Error in fallback handleProposalExecuted:', e); }
+    });
+    fallbackEmitter.on('proposal.cancelled', async (data) => {
+      try { await handleProposalCancelled(data); } catch (e) { logger.error('Error in fallback handleProposalCancelled:', e); }
+    });
+    fallbackEmitter.on('transaction.executed', async (data) => {
+      try { await handleTransactionExecuted(data); } catch (e) { logger.error('Error in fallback handleTransactionExecuted:', e); }
+    });
   }
 }
 

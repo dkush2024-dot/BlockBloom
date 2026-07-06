@@ -72,7 +72,9 @@ export default function ElectionDashboard() {
     formData.append('file', csvFile);
 
     try {
-      const res = await fetch(`${API_BASE}/verifications/${address}/upload`, {
+      // Superadmins can force-update the whitelist even after votes have been cast
+      const forceParam = user?.role === 'superadmin' ? '?force=true' : '';
+      const res = await fetch(`${API_BASE}/verifications/${address}/upload${forceParam}`, {
         method: 'POST',
         headers: { Authorization: `Bearer ${token}` },
         body: formData,

@@ -41,6 +41,7 @@ module.exports = {
   getElectionFactoryContract,
   getElectionContract,
   getTreasuryContract,
+  getAdminWallet,
   getElectionContractWithSigner,
   ElectionFactoryABI,
   ElectionABI,

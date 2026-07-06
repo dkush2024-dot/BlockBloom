@@ -42,6 +42,9 @@ async function connectRabbitMQ() {
   }
 }
 
+const EventEmitter = require('events');
+const fallbackEmitter = new EventEmitter();
+
 function getChannel() {
   if (!channel) {
     throw new Error('RabbitMQ channel not initialized');
@@ -51,8 +54,9 @@ function getChannel() {
 
 function publishEvent(routingKey, data) {
   if (!channel) {
-    logger.warn('RabbitMQ channel not ready, message not sent:', routingKey);
-    return false;
+    logger.warn(`⚠️ RabbitMQ not connected. Falling back to in-memory event dispatch: "${routingKey}"`);
+    fallbackEmitter.emit(routingKey, data);
+    return true;
   }
   try {
     channel.publish(
@@ -80,4 +84,5 @@ module.exports = {
   publishEvent,
   closeRabbitMQ,
   QUEUE_NAME,
+  fallbackEmitter,
 };

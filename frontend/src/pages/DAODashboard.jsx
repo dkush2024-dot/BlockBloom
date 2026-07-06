@@ -169,12 +169,10 @@ function DAODashboard() {
       setLoading(true);
 
       // Fetch DAO details from blockchain for Name
-      await ensureContractDeployed(provider, address, "Governance");
-      const gov = new Contract(address, contracts.Governance.abi, provider);
+      await ensureContractDeployed(provider, address, "Election");
+      const gov = new Contract(address, contracts.Election.abi, provider);
       const name = await gov.name();
       setDaoName(name);
-
-      const daoBloomToken = await gov.bloomToken();
 
       try {
         const tAddr = await gov.treasury();
@@ -184,16 +182,11 @@ function DAODashboard() {
       } catch(e) {
         console.warn("Could not load treasury", e);
       }
-      if (daoBloomToken.toLowerCase() !== contracts.BloomToken.address.toLowerCase()) {
-        throw new Error(
-          `This DAO was created with a stale BloomToken address (${daoBloomToken}). Recreate the DAO after deploying the current BloomToken contract at ${contracts.BloomToken.address}.`
-        );
-      }
 
       const decorateWithQuorumAndFinalized = async (propsList) => {
-        const tokenAddress = await gov.bloomToken();
+        const tokenAddress = contracts.BloomToken.address;
         const token = new Contract(tokenAddress, contracts.BloomToken.abi, provider);
-        const quorumPercentage = Number(await gov.quorumPercentage());
+        const quorumVotes = Number(await gov.quorumVotes());
         
         let treasuryContract = null;
         try {
@@ -204,20 +197,10 @@ function DAODashboard() {
         }
 
         return Promise.all(propsList.map(async (p) => {
-          let requiredQuorum = 0;
+          let requiredQuorum = quorumVotes;
           let isFinalized = p.status === 'finalized';
           let timelockTxId = p.timelockTxId || null;
           let executeAfter = 0;
-
-          try {
-            const snap = Number(p.snapshotBlock);
-            if (snap > 0) {
-              const supply = await token.getPastTotalSupply(snap);
-              requiredQuorum = (parseFloat(formatEther(supply)) * quorumPercentage) / 100;
-            }
-          } catch (err) {
-            console.warn(`Could not fetch past total supply for proposal #${p.id} at block ${p.snapshotBlock}:`, err);
-          }
 
           // If it's a financial proposal and executed on-chain, and we don't know if it's finalized
           if (p.executed && p.target && p.target !== "0x0000000000000000000000000000000000000000" && !isFinalized && treasuryContract) {
@@ -323,16 +306,10 @@ function DAODashboard() {
     setCreating(true);
     try {
       const provider = await getProvider();
-      await ensureContractDeployed(provider, address, "Governance");
+      await ensureContractDeployed(provider, address, "Election");
       const signer = await getEthersSigner();
       if (!signer) throw new Error("Wallet not connected. Please connect via RainbowKit.");
-      const gov = new Contract(address, contracts.Governance.abi, signer);
-      const daoBloomToken = await gov.bloomToken();
-      if (daoBloomToken.toLowerCase() !== contracts.BloomToken.address.toLowerCase()) {
-        throw new Error(
-          `This DAO was created with a stale BloomToken address (${daoBloomToken}). It cannot create proposals on the current network. Create a new DAO using the updated BloomToken deployment at ${contracts.BloomToken.address}.`
-        );
-      }
+      const gov = new Contract(address, contracts.Election.abi, signer);
       const token = new Contract(contracts.BloomToken.address, contracts.BloomToken.abi, signer);
       const userAddress = await signer.getAddress();
 
@@ -425,7 +402,7 @@ function DAODashboard() {
       const provider = await getProvider();
       const signer = await getEthersSigner();
       if (!signer) throw new Error("Wallet not connected.");
-      const gov = new Contract(address, contracts.Governance.abi, signer);
+      const gov = new Contract(address, contracts.Election.abi, signer);
       
       const tx = await gov.executeProposal(proposalId);
       await tx.wait();
@@ -446,7 +423,7 @@ function DAODashboard() {
       const provider = await getProvider();
       const signer = await getEthersSigner();
       if (!signer) throw new Error("Wallet not connected.");
-      const gov = new Contract(address, contracts.Governance.abi, signer);
+      const gov = new Contract(address, contracts.Election.abi, signer);
       
       const tx = await gov.finalizeProposal(proposalId);
       await tx.wait();
@@ -468,7 +445,7 @@ function DAODashboard() {
       const provider = await getProvider();
       const signer = await getEthersSigner();
       if (!signer) throw new Error("Wallet not connected.");
-      const gov = new Contract(address, contracts.Governance.abi, signer);
+      const gov = new Contract(address, contracts.Election.abi, signer);
       
       const tx = await gov.cancelProposal(proposalId);
       await tx.wait();
@@ -511,11 +488,32 @@ function DAODashboard() {
     setVotingOn(proposalId);
     try {
       setErrorMessage("");
+      
+      // 1. Fetch Merkle Proof from backend
+      let proof = [];
+      const jwtToken = localStorage.getItem("token");
+      if (jwtToken) {
+        const res = await fetch(`${API_BASE}/verifications/${address}/proof`, {
+          headers: { Authorization: `Bearer ${jwtToken}` }
+        });
+        if (res.ok) {
+          const resData = await res.json();
+          if (resData.success) {
+            if (!resData.isWhitelisted) {
+              throw new Error("Your address is not on the voter whitelist for this election!");
+            }
+            proof = resData.proof;
+          }
+        }
+      }
+      
       const provider = await getProvider();
       const signer = await getEthersSigner();
       if (!signer) throw new Error("Wallet not connected.");
-      const gov = new Contract(address, contracts.Governance.abi, signer);
-      const tx = await gov.vote(BigInt(proposalId), BigInt(optionIndex));
+      const gov = new Contract(address, contracts.Election.abi, signer);
+      
+      // 2. Cast vote on-chain with the Merkle Proof
+      const tx = await gov.vote(BigInt(proposalId), BigInt(optionIndex), proof);
       await tx.wait();
       showToast("Vote cast successfully! ✅", "success");
       await loadDAO(provider);

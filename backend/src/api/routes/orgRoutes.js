@@ -5,7 +5,7 @@ const { requireAuth } = require('../middleware/authMiddleware');
 const { requireRole } = require('../middleware/rbac');
 
 // Organization routes
-router.post('/', requireAuth, orgController.createOrganization);
+router.post('/', requireAuth, requireRole('superadmin'), orgController.createOrganization);
 router.get('/', orgController.getOrganizations);
 
 // Department routes nested under organizations

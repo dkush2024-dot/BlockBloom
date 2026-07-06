@@ -1,179 +1,129 @@
-# 📋 BlockBloom — Teammate Setup Guide
-### For Chinmay & Kushagra — Run on Your Localhost
+# 📋 BlockBloom — Teammate Local Setup & Testing Guide
+
+This guide describes how to run and test the complete **BlockBloom Student Governance DApp** on your local machine using Hardhat accounts.
 
 ---
 
-## ✅ Prerequisites (Install Once)
-
-- [Node.js v18+](https://nodejs.org/) — check with `node --version`
-- [MetaMask](https://metamask.io/) browser extension installed
-- Git installed
+## 🛠️ Prerequisites
+- [Node.js v18+](https://nodejs.org/)
+- [MetaMask Browser Extension](https://metamask.io/)
+- MongoDB is **not** required (the backend spins up a persistent local in-memory DB automatically!)
 
 ---
 
-## 🔁 Step 0 — Pull Latest Code
+## 🚀 Running the Project (4 Terminals)
 
+Run each command in its respective directory. Wait for the confirmation outputs before proceeding.
+
+### Terminal 1 — Start the Local Blockchain Node
 ```bash
-git checkout main
-git pull origin main
-```
-
----
-
-## 📦 Step 0.5 — Install Dependencies (First Time Only)
-
-Run these one by one from the `FinalTask` folder:
-
-```bash
-cd hardhat  && npm install
-cd ..
-cd backend  && npm install
-cd ..
-cd frontend && npm install
-cd ..
-```
-
----
-
-## 🚀 Starting the Project (4 Terminals)
-
-> Open 4 separate terminal windows. Run each in order and wait for the confirmation message before moving to the next.
-
----
-
-### Terminal 1 — Start the Blockchain Node
-
-```bash
-cd e:\Blockboom\BlockBloom_GDG_Project-main\BlockBloom_GDG_Project-main\FinalTask\hardhat
+cd hardhat
 npx hardhat node
 ```
-
-⏳ **Wait until you see:**
-```
-Started HTTP and WebSocket JSON-RPC server at http://127.0.0.1:8545/
-```
-🔴 Keep this terminal open and running the whole time.
+*Wait for:* `Started HTTP and WebSocket JSON-RPC server at http://127.0.0.1:8545/`
 
 ---
 
-### Terminal 2 — Deploy Contracts + Auto-Configure Everything
-
+### Terminal 2 — Deploy Contracts
 ```bash
-cd e:\Blockboom\BlockBloom_GDG_Project-main\BlockBloom_GDG_Project-main\FinalTask\hardhat
+cd hardhat
 npm run setup
 ```
-
-⏳ **Wait until you see:**
-```
-✅ LOCAL DEPLOYMENT COMPLETE
-📝 Updated frontend/src/contracts.json with new addresses
-📝 Created backend/.env from .env.example with new addresses
-```
-
-> ✨ This does everything automatically:
-> - Deploys `BloomToken` + `DAOFactory` to your local node
-> - Updates `frontend/src/contracts.json` with YOUR addresses
-> - Creates `backend/.env` with YOUR addresses
-> - **You never need to manually copy-paste any address**
+*Wait for:* `✅ LOCAL DEPLOYMENT COMPLETE` (This updates contract JSONs automatically).
 
 ---
 
 ### Terminal 3 — Start the Backend
-
 ```bash
-cd e:\Blockboom\BlockBloom_GDG_Project-main\BlockBloom_GDG_Project-main\FinalTask\backend
+cd backend
 npm run dev
 ```
-
-⏳ **Wait until you see:**
-```
-MongoDB     : Connected ✅
-Socket.IO   : Ready ✅
-Indexer     : Running ✅
-```
+*Wait for:* `Persistent dev MongoDB: Connected ✅` and `Indexer: Running ✅`
 
 ---
 
 ### Terminal 4 — Start the Frontend
-
 ```bash
-cd e:\Blockboom\BlockBloom_GDG_Project-main\BlockBloom_GDG_Project-main\FinalTask\frontend
+cd frontend
 npm run dev
 ```
-
-⏳ **Wait until you see:**
-```
-Local:   http://localhost:5173/
-```
+*Wait for:* `Local: http://localhost:5173/`
 
 ---
 
-## 🦊 Step — Configure MetaMask
+## 🦊 MetaMask Configuration
 
-1. Open MetaMask → click the **network dropdown** at top
-2. Click **"Add a custom network"**
-3. Fill in:
-
-| Field | Value |
-|---|---|
-| Network Name | `Hardhat Localhost` |
-| New RPC URL | `http://127.0.0.1:8545` |
-| Chain ID | `31337` |
-| Currency Symbol | `ETH` |
-
-4. **Import a test wallet** using a private key from Terminal 1 output:
-
-```
-Account #0:  0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266
-Private Key: 0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80
-```
-> In MetaMask → click account icon → Import Account → paste the private key
+1. In MetaMask, go to **Settings** → **Networks** → **Add a network** → **Add a network manually**.
+2. Input the following details:
+   - **Network Name**: `Hardhat Localhost`
+   - **RPC URL**: `http://127.0.0.1:8545`
+   - **Chain ID**: `31337`
+   - **Currency Symbol**: `ETH`
+3. Save and switch to the network.
 
 ---
 
-## 🌐 Open the App
+## 🔑 Importing Test Accounts
+To test the roles, import the following private keys into MetaMask (Click account circle → **Import Account**):
 
-Go to: **http://localhost:5173**
+### 🛡️ Account #0: SUPERADMIN
+- **Address**: `0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266`
+- **Private Key**: `0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80`
 
-- Click **"+ Deploy New DAO"** to create your first DAO
-- Create proposals, vote, check the leaderboard!
+### 💼 Account #1: ORGANIZATION ADMIN
+- **Address**: `0x70997970C51812dc3A010C7d01b50e0d17dc79C8`
+- **Private Key**: `0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d`
 
----
+### 🎓 Account #2: STUDENT A
+- **Address**: `0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC`
+- **Private Key**: `0x5de4111def4ec12d9c427f1d9d94a4e226a1475c707519f4e0500667e93a44a4`
 
-## 🔄 Every Day Workflow
-
-When you come back the next day or restart your PC, run all 4 steps again in order:
-
-```
-Terminal 1:  cd hardhat   →  npx hardhat node
-Terminal 2:  cd hardhat   →  npm run setup
-Terminal 3:  cd backend   →  npm run dev
-Terminal 4:  cd frontend  →  npm run dev
-```
-
----
-
-## ❓ Common Errors & Fixes
-
-| Error Message | What It Means | Fix |
-|---|---|---|
-| `EADDRINUSE: port 5000` | Old backend still running in background | Run: `Get-Process node \| Stop-Process -Force` then restart backend |
-| `ECONNREFUSED 127.0.0.1:8545` | Hardhat node isn't running | Start Terminal 1 first, then rerun setup |
-| `"stale BloomToken address"` error on DAO page | Ran setup without restarting the node | Restart node → `npm run setup` → create new DAOs |
-| `429 Too Many Requests` in browser console | Rate limit hit (shouldn't happen now) | Restart backend |
-| MetaMask says "wrong network" | MetaMask on wrong chain | Switch to `Hardhat Localhost` (chainId 31337) |
-| `npm run setup` fails instantly | Hardhat node not running | Start Terminal 1 first, wait for it to be ready |
+### 🎓 Account #3: STUDENT B (Funded with 10 ETH)
+- **Address**: `0xa743c6C16Ca7e554f58fb3fC650fbF2c146058cf`
+- **Private Key**: `0x7c852118294e51e653712a81e05800f4191417423b62528413b5247852c00222`
 
 ---
 
-## ⚠️ Important Rules
+## 📋 End-to-End Testing Scenario
 
-1. **Always start terminals in order: 1 → 2 → 3 → 4**
-2. **Never manually edit** `frontend/src/contracts.json` addresses — `npm run setup` handles it
-3. **Never manually edit** `backend/.env` addresses — `npm run setup` handles it
-4. **Never commit** your `backend/.env` file — it's in `.gitignore` on purpose
-5. Each person gets **different addresses** on their machine — that's normal and expected
+Follow these steps to run a full test cycle:
+
+### Step 1 — Register Organization & Admin (SuperAdmin View)
+1. Log into MetaMask on **Account #0 (SUPERADMIN)** and open `http://localhost:5173`.
+2. Go to **Organizations** and click **New Organization**.
+3. Set Organization Name (e.g. `TPBIT University`).
+4. Set the **Admin Wallet Address** to Account #1's address:
+   `0x70997970C51812dc3A010C7d01b50e0d17dc79C8`
+5. Click **Create Organization**.
 
 ---
 
-*BlockBloom DAO · Phase 3 · May 2026*
+### Step 2 — Deploy Election (Admin View)
+1. Switch MetaMask to **Account #1 (ORGANIZATION ADMIN)**.
+2. Under the newly created organization, click **+ Election**.
+3. Enter the election name (e.g. `Student Council 2026`).
+4. Submit the transaction and wait for confirmation.
+5. Expand the organization card and click on the newly deployed Election to open its dashboard.
+
+---
+
+### Step 3 — Set Voter Whitelist
+1. Locate the `whitelist.csv` file in the root directory. It contains the following whitelisted addresses:
+   ```csv
+   walletAddress
+   0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266
+   0x70997970C51812dc3A010C7d01b50e0d17dc79C8
+   0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC
+   0xa743c6C16Ca7e554f58fb3fC650fbF2c146058cf
+   ```
+2. While logged in as **Account #1 (ADMIN)**, click **Choose File** in the **Upload Voter Whitelist** card.
+3. Select `whitelist.csv` and click **Upload & Generate**.
+4. This registers the Merkle root on-chain.
+
+---
+
+### Step 4 — Create Proposal & Vote (Student View)
+1. While still logged in as **Account #1**, click **+ Create Proposal** to add a proposal.
+2. Switch MetaMask to **Account #2 (STUDENT A)** or **Account #3 (STUDENT B)**.
+3. Reload/Sign in, click the proposal, select an option, and cast your vote!
+4. Check the **Leaderboard** and **Admin Panel** to see the update in statistics.

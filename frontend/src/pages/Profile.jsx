@@ -131,11 +131,16 @@ function Profile() {
       ) : (
         <div className="space-y-3">
           {votes.map((vote, idx) => {
-            const weight = vote.weight
-              ? parseFloat(formatEther(vote.weight)).toLocaleString(undefined, {
+            let weight = "—";
+            if (vote.weight) {
+              if (vote.weight.length > 10) {
+                weight = parseFloat(formatEther(vote.weight)).toLocaleString(undefined, {
                   maximumFractionDigits: 2,
-                })
-              : "—";
+                });
+              } else {
+                weight = vote.weight;
+              }
+            }
 
             return (
               <div

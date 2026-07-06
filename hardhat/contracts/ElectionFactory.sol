@@ -11,7 +11,7 @@ contract ElectionFactory {
     address[] public allElections;
 
     event ElectionCreated(
-        string indexed orgId,
+        string orgId,
         address indexed electionAddress,
         address indexed treasuryAddress,
         string name,
@@ -25,14 +25,16 @@ contract ElectionFactory {
     /// @param _name The name of the Election
     /// @param _timelockDelay Time (in seconds) that financial transactions must wait before execution
     /// @param _quorumVotes Absolute number of votes required to pass a proposal
+    /// @param _backendAdmin The address of the backend admin wallet
     function createElection(
         string memory _orgId,
         string memory _name,
         uint256 _timelockDelay,
-        uint256 _quorumVotes
+        uint256 _quorumVotes,
+        address _backendAdmin
     ) public returns (address) {
-        // Deploy the new election
-        Election newElection = new Election(_name, _timelockDelay, _quorumVotes, msg.sender);
+        // Deploy the new election: owner is msg.sender, backendAdmin is _backendAdmin
+        Election newElection = new Election(_name, _timelockDelay, _quorumVotes, msg.sender, _backendAdmin);
         address electionAddress = address(newElection);
         
         // Track the election globally and per-organization

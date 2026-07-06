@@ -13,6 +13,7 @@ contract Election is Ownable, ReentrancyGuard, Pausable {
     Treasury public treasury;
     uint256 public quorumVotes; // Absolute number of votes required to pass a proposal
     bytes32 public merkleRoot; // Root of the Merkle tree of whitelisted voters
+    address public backendAdmin;
 
     struct Proposal {
         uint256 id;
@@ -43,16 +44,19 @@ contract Election is Ownable, ReentrancyGuard, Pausable {
         string memory _name,
         uint256 _timelockDelay,
         uint256 _quorumVotes,
-        address _admin
+        address _admin,
+        address _backendAdmin
     ) Ownable(_admin) {
         name = _name;
         quorumVotes = _quorumVotes;
+        backendAdmin = _backendAdmin;
         // Each Election automatically gets its own Treasury with the specified timelock delay
         treasury = new Treasury(address(this), _timelockDelay);
     }
 
-    /// @notice Set the Merkle Root for the voter whitelist. Only callable by the Election Admin.
-    function setMerkleRoot(bytes32 _merkleRoot) external onlyOwner {
+    /// @notice Set the Merkle Root for the voter whitelist. Only callable by the Election Admin or Backend Admin.
+    function setMerkleRoot(bytes32 _merkleRoot) external {
+        require(msg.sender == owner() || msg.sender == backendAdmin, "Only Admin or Backend Admin can set Merkle Root");
         merkleRoot = _merkleRoot;
         emit MerkleRootUpdated(_merkleRoot);
     }
@@ -135,7 +139,7 @@ contract Election is Ownable, ReentrancyGuard, Pausable {
         require(merkleRoot != bytes32(0), "Voter whitelist not set");
 
         // Verify the voter is in the Merkle tree
-        bytes32 leaf = keccak256(bytes.concat(keccak256(abi.encode(msg.sender))));
+        bytes32 leaf = keccak256(abi.encode(msg.sender));
         require(MerkleProof.verify(_merkleProof, merkleRoot, leaf), "Not whitelisted to vote");
 
         // Record the vote

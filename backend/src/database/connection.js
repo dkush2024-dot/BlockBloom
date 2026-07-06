@@ -26,10 +26,22 @@ async function connectDatabase() {
     if (config.nodeEnv === 'development' && config.useInMemoryDb) {
       try {
         const { MongoMemoryServer } = require('mongodb-memory-server');
+        const path = require('path');
+        const fs = require('fs');
+
+        // Use a persistent data directory so data survives restarts
+        const dbPath = path.join(__dirname, '..', '..', '.mongodb-data');
+        if (!fs.existsSync(dbPath)) fs.mkdirSync(dbPath, { recursive: true });
+
         logger.info('Starting MongoMemoryServer for development...');
-        mongoServer = await MongoMemoryServer.create();
+        mongoServer = await MongoMemoryServer.create({
+          instance: {
+            dbPath,          // Persist data to disk
+            storageEngine: 'wiredTiger',
+          },
+        });
         uri = mongoServer.getUri();
-        logger.info(`✨ Spin up in-memory MongoDB: ${uri}`);
+        logger.info(`✨ Persistent dev MongoDB: ${uri} (data at ${dbPath})`);
       } catch (memErr) {
         logger.warn('Failed to spin up in-memory MongoDB, using default config:', memErr.message);
       }

@@ -5,24 +5,31 @@ class OrgController {
   // POST /api/organizations
   async createOrganization(req, res, next) {
     try {
-      const { name, description } = req.body;
+      const { name, description, adminAddress: bodyAdminAddress } = req.body;
       
       const exists = await Organization.findOne({ name });
       if (exists) {
         throw ApiError.badRequest('Organization name already exists');
       }
 
+      const isSuperAdmin = (req.user.role === 'superadmin');
+      // SuperAdmin can specify an admin address in the body; otherwise use the requester's address
+      const assignedAdmin = (isSuperAdmin && bodyAdminAddress)
+        ? bodyAdminAddress.toLowerCase()
+        : req.user.address.toLowerCase();
+
       const org = await Organization.create({
         name,
         description,
         creatorAddress: req.user.address,
-        adminAddress: req.user.address // The creator becomes the admin
+        adminAddress: assignedAdmin
       });
 
-      // Update the user who created it
+      // Link the admin user to this org (upsert=true creates the user record if needed)
       await User.findOneAndUpdate(
-        { walletAddress: req.user.address.toLowerCase() },
-        { organization: org._id, role: 'admin' }
+        { walletAddress: assignedAdmin },
+        { organization: org._id, role: 'admin' },
+        { upsert: true, new: true }
       );
 
       res.status(201).json({ success: true, organization: org });

@@ -1,5 +1,5 @@
 const asyncHandler = require('../../utils/asyncHandler');
-const { AuditLog, Vote, Election } = require('../../models');
+const { AuditLog, Vote, Election, Proposal } = require('../../models');
 
 /**
  * Get Audit Logs with pagination and filtering
@@ -79,7 +79,7 @@ exports.getElectionAnalytics = asyncHandler(async (req, res) => {
     },
   ];
 
-  const statusDistribution = await Election.aggregate(pipeline);
+  const statusDistribution = await Proposal.aggregate(pipeline);
   const totalElections = await Election.countDocuments();
 
   res.json({

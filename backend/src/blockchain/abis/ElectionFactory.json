@@ -3,7 +3,7 @@
     "anonymous": false,
     "inputs": [
       {
-        "indexed": true,
+        "indexed": false,
         "internalType": "string",
         "name": "orgId",
         "type": "string"
@@ -88,6 +88,11 @@
         "internalType": "uint256",
         "name": "_quorumVotes",
         "type": "uint256"
+      },
+      {
+        "internalType": "address",
+        "name": "_backendAdmin",
+        "type": "address"
       }
     ],
     "name": "createElection",

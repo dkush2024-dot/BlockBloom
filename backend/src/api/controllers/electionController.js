@@ -1,4 +1,4 @@
-const { Election, Proposal } = require('../../models');
+const { Election, Proposal, Organization } = require('../../models');
 const { ApiError } = require('../../utils');
 
 class ElectionController {
@@ -53,6 +53,38 @@ class ElectionController {
       const total = await Proposal.countDocuments({ daoAddress: req.params.address.toLowerCase() });
 
       res.json({ success: true, proposals, total, page, totalPages: Math.ceil(total / limit) });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  // POST /api/elections/fix-orphaned  (admin utility)
+  async fixOrphanedElections(req, res, next) {
+    try {
+      const { targetOrgId } = req.body;
+      const orgs = await Organization.find({});
+      
+      if (orgs.length === 0) {
+        return res.json({ success: false, message: 'No organizations found' });
+      }
+
+      const validOrgIds = orgs.map(o => o._id.toString());
+      // Find elections whose orgId is NOT one of the valid org IDs
+      const allElections = await Election.find({});
+      let fixedCount = 0;
+
+      for (const election of allElections) {
+        if (!validOrgIds.includes(election.orgId)) {
+          // Use targetOrgId if provided, otherwise use the only/first org
+          const newOrgId = targetOrgId || (orgs.length === 1 ? orgs[0]._id.toString() : null);
+          if (newOrgId) {
+            await Election.findByIdAndUpdate(election._id, { orgId: newOrgId });
+            fixedCount++;
+          }
+        }
+      }
+
+      res.json({ success: true, fixedCount, message: `Fixed ${fixedCount} orphaned elections` });
     } catch (error) {
       next(error);
     }

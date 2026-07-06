@@ -15,4 +15,7 @@ router.get('/me', requireAuth, authController.getMe);
 // GET /api/auth/roles - Get available roles
 router.get('/roles', authController.getRoles);
 
+// GET /api/auth/admin-address - Get backend admin wallet address
+router.get('/admin-address', authController.getAdminAddress);
+
 module.exports = router;

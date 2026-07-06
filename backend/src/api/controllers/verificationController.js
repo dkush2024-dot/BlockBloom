@@ -3,7 +3,7 @@ const keccak256 = require('keccak256');
 const csv = require('csv-parser');
 const fs = require('fs');
 const { ethers } = require('ethers');
-const { StudentVerification, Election } = require('../../models');
+const { StudentVerification, Election, User } = require('../../models');
 const { getElectionContractWithSigner } = require('../../blockchain/contracts');
 const { ApiError } = require('../../utils');
 
@@ -21,14 +21,27 @@ class VerificationController {
         throw ApiError.notFound('Election not found');
       }
 
-      // Check organization scope (superadmins bypass this)
-      if (req.user.role !== 'superadmin' && String(election.orgId) !== String(req.user.orgId)) {
+      // Get the latest user record to verify organization mapping
+      const dbUser = await User.findById(req.user.userId);
+      if (!dbUser) {
+        throw ApiError.unauthorized('User not found');
+      }
+
+      // Check organization scope:
+      // Allow if: superadmin, OR user's org matches election's org, OR user is the election creator
+      const userAddress = (dbUser.walletAddress || req.user.address || '').toLowerCase();
+      const isCreator = election.creator && election.creator.toLowerCase() === userAddress;
+      const hasOrgAccess = String(election.orgId) === String(dbUser.organization);
+
+      if (dbUser.role !== 'superadmin' && !hasOrgAccess && !isCreator) {
         throw ApiError.forbidden('You do not have permission to manage this election.');
       }
 
-      // Check for mid-election whitelist tampering
-      if (election.proposalCount > 0) {
-        throw ApiError.badRequest('Cannot update whitelist: Election already has proposals.');
+      // Block mid-election whitelist tampering only after votes have been cast
+      // Superadmins can force-update with ?force=true (for testing/corrections)
+      const forceUpdate = req.query.force === 'true' && dbUser.role === 'superadmin';
+      if (election.totalVotes > 0 && !forceUpdate) {
+        throw ApiError.badRequest('Cannot update whitelist: Votes have already been cast. Superadmin can use ?force=true to override.');
       }
 
       const addresses = [];
