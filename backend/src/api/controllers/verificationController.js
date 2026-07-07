@@ -104,8 +104,8 @@ class VerificationController {
 
       res.json({ success: true, message: 'Students verified and Merkle Root set on-chain', root, count: addresses.length });
     } catch (error) {
-      // Clean up file if error happened before try-finally
-      if (req.file && fs.existsSync(req.file.path)) {
+      // Clean up file if error happened
+      if (req.file && typeof req.file.path === 'string' && fs.existsSync(req.file.path)) {
         fs.unlinkSync(req.file.path);
       }
       next(error);
