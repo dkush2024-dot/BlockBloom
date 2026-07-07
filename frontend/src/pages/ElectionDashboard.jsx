@@ -1,6 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
+import { ethers } from 'ethers';
+import { getEthersSigner } from '../utils/adapters';
+import ElectionABI from '../abis/Election.json';
 
 const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:5000/api';
 
@@ -67,7 +70,7 @@ export default function ElectionDashboard() {
     if (!csvFile || uploading) return;
 
     setUploading(true);
-    setUploadStatus('Uploading & generating Merkle Tree...');
+    setUploadStatus('Uploading CSV & computing Merkle Tree on backend...');
     const formData = new FormData();
     formData.append('file', csvFile);
 
@@ -81,17 +84,29 @@ export default function ElectionDashboard() {
       });
       const data = await res.json();
       if (data.success) {
-        setUploadStatus(`✅ Success! ${data.count} students whitelisted. Merkle Root updated on-chain.`);
+        setUploadStatus('⚡ Requesting on-chain transaction to set Merkle Root... Please confirm in MetaMask.');
+        
+        // Connect to MetaMask to send transaction
+        const signer = await getEthersSigner();
+        if (!signer) {
+          throw new Error('MetaMask signer not available. Please connect your wallet.');
+        }
+
+        const electionContract = new ethers.Contract(address, ElectionABI.abi || ElectionABI, signer);
+        const tx = await electionContract.setMerkleRoot(data.root);
+        setUploadStatus('⏳ Broadcasting transaction on-chain...');
+        await tx.wait();
+
+        setUploadStatus(`✅ Success! ${data.count} students whitelisted. Merkle Root set on Sepolia.`);
         setCsvFile(null);
-        // Refresh election to show new Merkle root
-        const electionRes = await fetch(`${API_BASE}/elections/${address}`);
-        const electionData = await electionRes.json();
-        if (electionData.success) setElection(electionData.election);
+        
+        // Refresh election details
+        fetchElectionData();
       } else {
         setUploadStatus(`❌ Error: ${data.error || 'Upload failed'}`);
       }
     } catch (err) {
-      setUploadStatus('❌ Network error. Please try again.');
+      setUploadStatus(`❌ Error: ${err.message || 'Network error. Please try again.'}`);
     } finally {
       setUploading(false);
     }

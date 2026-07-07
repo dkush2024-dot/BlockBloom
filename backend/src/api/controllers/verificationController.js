@@ -77,18 +77,9 @@ class VerificationController {
       const tree = new MerkleTree(leaves, keccak256, { sortPairs: true });
       const root = tree.getHexRoot();
 
-      // Call setMerkleRoot on the smart contract
-      const contract = getElectionContractWithSigner(electionAddress);
-      if (!contract) {
-        throw ApiError.internal('Could not instantiate contract with admin signer. Check ADMIN_PRIVATE_KEY.');
-      }
-
-      try {
-        const tx = await contract.setMerkleRoot(root);
-        await tx.wait(); // Wait for confirmation
-      } catch (blockchainErr) {
-        throw ApiError.internal(`Blockchain transaction failed: ${blockchainErr.message}`);
-      }
+      // We now delegate setting the Merkle Root on-chain to the frontend
+      // to avoid running out of gas on the backend admin signer.
+      // Simply generate and save the root and proofs to the database.
 
       // Update election doc
       election.merkleRoot = root;
