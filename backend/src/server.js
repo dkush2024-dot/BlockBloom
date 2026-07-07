@@ -60,8 +60,25 @@ const app = express();
 app.use(helmet());
 
 // CORS — allow the React frontend to make requests to this backend
+// Supports comma-separated strings or dynamic Vercel subdomains
+const allowedOrigins = config.corsOrigin ? config.corsOrigin.split(',').map(o => o.trim().toLowerCase()) : [];
+
 app.use(cors({
-  origin: config.corsOrigin,
+  origin: (origin, callback) => {
+    if (!origin) return callback(null, true); // Allow server-to-server or curl requests
+    const originLower = origin.toLowerCase();
+    
+    // Check if origin is explicitly allowed or matches a Vercel subdomain pattern for block-bloom
+    const isAllowed = allowedOrigins.includes(originLower) || 
+                      originLower.endsWith('vercel.app') ||
+                      originLower.includes('localhost');
+                      
+    if (isAllowed) {
+      callback(null, true);
+    } else {
+      callback(new Error('Blocked by CORS'));
+    }
+  },
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH'],
   allowedHeaders: ['Content-Type', 'Authorization'],
   credentials: true,
