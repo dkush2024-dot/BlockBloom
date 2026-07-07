@@ -36,11 +36,11 @@ router.get('/health', async (req, res) => {
     // Channel not ready
   }
 
-  const isHealthy = mongoStatus === 'up' && redisStatus === 'up' && rabbitmqStatus === 'up';
+  const isHealthy = mongoStatus === 'up'; // Only MongoDB is required for core operations
 
   res.status(isHealthy ? 200 : 503).json({
     success: isHealthy,
-    message: isHealthy ? 'All systems operational' : 'Degraded state',
+    message: isHealthy ? 'Platform operational' : 'Database down',
     timestamp: new Date().toISOString(),
     uptime: process.uptime(),
     services: {
