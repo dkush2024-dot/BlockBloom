@@ -38,11 +38,7 @@ const logger = createLogger({
   ],
 });
 
-// In production, also write to rotating log files
-if (config.isProduction) {
-  const logDir = path.join(__dirname, '../../logs');
-  logger.add(new transports.File({ filename: path.join(logDir, 'error.log'), level: 'error' }));
-  logger.add(new transports.File({ filename: path.join(logDir, 'combined.log') }));
-}
+// File transport is disabled in production to prevent write permission issues on read-only cloud filesystems like Render.
+// Logs are collected automatically from stdout/stderr.
 
 module.exports = logger;
