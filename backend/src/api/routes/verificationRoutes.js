@@ -5,7 +5,8 @@ const verificationController = require('../controllers/verificationController');
 const { requireAuth } = require('../middleware/authMiddleware');
 const { requireRole } = require('../middleware/rbac');
 
-const upload = multer({ dest: 'uploads/' });
+const storage = multer.memoryStorage();
+const upload = multer({ storage });
 
 // POST /api/verifications/:electionAddress/upload
 router.post('/:electionAddress/upload', requireAuth, requireRole('superadmin', 'admin'), upload.single('file'), verificationController.uploadCSV);

@@ -47,9 +47,10 @@ class VerificationController {
       const addresses = [];
 
       try {
-        // Parse CSV
+        // Parse CSV from memory buffer
+        const { Readable } = require('stream');
         await new Promise((resolve, reject) => {
-          fs.createReadStream(req.file.path)
+          Readable.from(req.file.buffer)
             .pipe(csv())
             .on('data', (row) => {
               // Assume column name is 'walletAddress' or 'address'
@@ -61,11 +62,8 @@ class VerificationController {
             .on('end', resolve)
             .on('error', reject);
         });
-      } finally {
-        // Always remove temp file
-        if (fs.existsSync(req.file.path)) {
-          fs.unlinkSync(req.file.path);
-        }
+      } catch (err) {
+        throw err;
       }
 
       if (addresses.length === 0) {
