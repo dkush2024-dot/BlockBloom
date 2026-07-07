@@ -40,9 +40,16 @@ class AuthController {
 
       const siweMessage = new SiweMessage(message);
       
-      const { data: fields } = await siweMessage.verify({
-        signature,
-      });
+      // Verify signature using ethers to avoid "non-canonical s" TypeError with Ethers v6
+      const preparedMessage = siweMessage.prepareMessage();
+      const recoveredAddress = ethers.verifyMessage(preparedMessage, signature);
+      
+      if (recoveredAddress.toLowerCase() !== siweMessage.address.toLowerCase()) {
+        throw ApiError.unauthorized('Signature verification failed');
+      }
+
+      // Fields map directly to siweMessage structure
+      const fields = siweMessage;
 
       if (redisClient.isOpen) {
         const isValid = await redisClient.get(`nonce:${fields.nonce}`);
